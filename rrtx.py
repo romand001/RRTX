@@ -12,12 +12,22 @@ class Node:
         self.y = n[1]
         self.parent = None
 
+    def __eq__(self, other):
+        '''
+        WRITTEN BY US
+        overrides == operator to compare node coordinates instead of object id's
+        '''
+        if isinstance(other, Node):
+            return (self.x - other.x) ** 2 + (self.y - other.y) ** 2 < 1e-6
+        return False
+
 
 class RRTX:
     def __init__(self, x_start, x_goal, step_len,
                  goal_sample_rate, search_radius, iter_max):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal)
+        self.s_bot = s_start
         self.step_len = step_len
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
@@ -28,6 +38,7 @@ class RRTX:
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
         self.utils = utils.Utils()
+        self.fig, self.ax = plt.subplots()
 
         self.x_range = self.env.x_range
         self.y_range = self.env.y_range
@@ -35,14 +46,30 @@ class RRTX:
         self.obs_rectangle = self.env.obs_rectangle
         self.obs_boundary = self.env.obs_boundary
 
+        ''' RRTX Stuff '''
+        # for gamma computation
+        self.d = 2 # dimension of the state space
+        self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
+        self.gamma_FOS = 1.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
+        self.update_gamma() # initialize gamma
+
+        # set up event handling
+        self.fig.canvas.mpl_connect('button_press_event', self.on_press)
+
+
     def planning(self):
-        for k in range(self.iter_max):
+        for i in range(self.iter_max):
+
+            self.search_radius = self.shrinking_ball_radius()
+
+            # animation and interaction
+            
+            
+
+
             node_rand = self.generate_random_node(self.goal_sample_rate)
             node_near = self.nearest_neighbor(self.vertex, node_rand)
             node_new = self.new_state(node_near, node_rand)
-
-            if k % 500 == 0:
-                print(k)
 
             if node_new and not self.utils.is_collision(node_near, node_new):
                 neighbor_index = self.find_near_neighbor(node_new)
@@ -52,10 +79,7 @@ class RRTX:
                     self.choose_parent(node_new, neighbor_index)
                     self.rewire(node_new, neighbor_index)
 
-        index = self.search_goal_parent()
-        self.path = self.extract_path(self.vertex[index])
-
-        self.plotting.animation(self.vertex, self.path, "rrt*, N = " + str(self.iter_max))
+            
 
     def new_state(self, node_start, node_goal):
         dist, theta = self.get_distance_and_angle(node_start, node_goal)
@@ -81,6 +105,10 @@ class RRTX:
             if self.cost(node_neighbor) > self.get_new_cost(node_new, node_neighbor):
                 node_neighbor.parent = node_new
 
+    def on_press(self, event):
+        x, y = int(event.xdata), int(event.ydata)
+        return
+
     def search_goal_parent(self):
         dist_list = [math.hypot(n.x - self.s_goal.x, n.y - self.s_goal.y) for n in self.vertex]
         node_index = [i for i in range(len(dist_list)) if dist_list[i] <= self.step_len]
@@ -105,6 +133,28 @@ class RRTX:
                          np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
 
         return self.s_goal
+
+    def update_gamma(self):
+        '''
+        WRITTEN BY US
+        computes and updates gamma required for shrinking ball radius
+        - gamma depends on the free space volume, so changes when obstacles are added or removed
+        - this assumes that obstacles don't overlap
+        '''
+        mu_X_free = (self.x_range[1] - self.x_range[0]) * (self.y_range[1] - self.y_range[0])
+        for (_, _, r) in self.obs_circle:
+            mu_X_free -= np.pi * r ** 2
+        for (_, _, w, h) in self.obs_rectangle:
+            mu_X_free -= w * h
+
+        self.gamma = self.gamma_FOS * 2 * (1 + 1/self.d)**(1/self.d) * (mu_X_free/self.zeta_d)**(1/self.d) # optimality condition from Theorem 38 of RRT* paper
+
+    def shrinking_ball_radius(self):
+        '''
+        WRITTEN BY US
+        Computes and returns the radius for the shrinking ball
+        '''
+        return self.gamma * (np.log(len(self.vertex)) / len(self.vertex))**(1/self.d)
 
     def find_near_neighbor(self, node_new):
         n = len(self.vertex) + 1
