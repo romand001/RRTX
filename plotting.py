@@ -72,6 +72,63 @@ class Plotting:
         plt.title(name)
         plt.axis("equal")
 
+    def plot_env(self, ax):
+        # start and goal
+        start_patch = patches.Circle(
+            (self.xI[0], self.xI[1]), 0.5,
+            edgecolor='green',
+            facecolor='green',
+            fill=True
+        )
+        goal_patch = patches.Circle(
+            (self.xG[0], self.xG[1]), 0.5,
+            edgecolor='red',
+            facecolor='red',
+            fill=True
+        )
+        ax.add_patch(start_patch)
+        ax.add_patch(goal_patch)
+        ax.draw_artist(start_patch)
+        ax.draw_artist(goal_patch)
+
+        # boundary obstacles
+        for (ox, oy, w, h) in self.obs_bound:
+            boundary_patch = patches.Rectangle(
+                (ox, oy), w, h,
+                edgecolor='black',
+                facecolor='black',
+                fill=True
+            )
+            ax.add_patch(boundary_patch)
+            ax.draw_artist(boundary_patch)
+
+        # rectangle obstacles
+        for (ox, oy, w, h) in self.obs_rectangle:
+            rect_patch = patches.Rectangle(
+                (ox, oy), w, h,
+                edgecolor='black',
+                facecolor='gray',
+                fill=True
+            )
+            ax.add_patch(rect_patch)
+            ax.draw_artist(rect_patch)
+
+        # circle obstacles
+        for (ox, oy, r) in self.obs_circle:
+            circle_patch = patches.Circle(
+                (ox, oy), r,
+                edgecolor='black',
+                facecolor='gray',
+                fill=True
+            )
+            ax.add_patch(circle_patch)
+            ax.draw_artist(circle_patch)
+
+    def update_obs(self, obs_cir, obs_bound, obs_rec):
+        self.obs_bound = obs_bound
+        self.obs_circle = obs_cir
+        self.obs_rectangle = obs_rec
+
     @staticmethod
     def plot_visited(nodelist, animation):
         if animation:

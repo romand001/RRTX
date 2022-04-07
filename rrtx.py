@@ -2,6 +2,8 @@ import os
 import sys
 import math
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 
 import env, plotting, utils, queue
 
@@ -21,24 +23,38 @@ class Node:
             return (self.x - other.x) ** 2 + (self.y - other.y) ** 2 < 1e-6
         return False
 
+class Edge:
+    def __init__(self, n_p, n_c):
+        self.parent = n_p
+        self.child = n_c
+        self.flag = "VALID"
 
 class RRTX:
     def __init__(self, x_start, x_goal, step_len,
                  goal_sample_rate, search_radius, iter_max):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal)
-        self.s_bot = s_start
+        self.s_bot = self.s_start
         self.step_len = step_len
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
         self.iter_max = iter_max
-        self.vertex = [self.s_start]
+        self.vertices = [self.s_start]
+        self.edges = []
         self.path = []
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
         self.utils = utils.Utils()
-        self.fig, self.ax = plt.subplots()
+
+        # plotting
+        self.fig, self.ax = plt.subplots(figsize=(12, 8))
+        self.fig.suptitle('RRTX')
+        self.ax.set_xlim(self.env.x_range[0], self.env.x_range[1]+1)
+        self.ax.set_ylim(self.env.y_range[0], self.env.y_range[1]+1)
+        self.bg = self.fig.canvas.copy_from_bbox(self.ax.bbox)
+        self.edge_col = LineCollection([], colors='blue', linewidths=0.5)
+        self.ax.add_collection(self.edge_col)
 
         self.x_range = self.env.x_range
         self.y_range = self.env.y_range
@@ -53,33 +69,56 @@ class RRTX:
         self.gamma_FOS = 1.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
         self.update_gamma() # initialize gamma
 
+
+    def planning(self):
+
         # set up event handling
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
 
+        # animation stuff
+        plt.gca().set_aspect('equal', adjustable='box')
+        self.edge_col.set_animated(True)
+        plt.show(block=False)
+        plt.pause(0.1)
+        self.ax.draw_artist(self.edge_col)
+        self.fig.canvas.blit(self.ax.bbox)
 
-    def planning(self):
         for i in range(self.iter_max):
 
             self.search_radius = self.shrinking_ball_radius()
 
-            # animation and interaction
-            
-            
+            # add like this for now
+            for node in self.vertices:
+                if node.parent:
+                    self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
+
+            # animation
+            self.edge_col.set_segments(np.array(self.edges))
+            self.fig.canvas.restore_region(self.bg)
+            self.plotting.plot_env(self.ax)
+            self.ax.draw_artist(self.edge_col)
+            self.fig.canvas.blit(self.ax.bbox)
+            self.fig.canvas.flush_events()
 
 
             node_rand = self.generate_random_node(self.goal_sample_rate)
-            node_near = self.nearest_neighbor(self.vertex, node_rand)
+            node_near = self.nearest_neighbor(self.vertices, node_rand)
             node_new = self.new_state(node_near, node_rand)
 
             if node_new and not self.utils.is_collision(node_near, node_new):
                 neighbor_index = self.find_near_neighbor(node_new)
-                self.vertex.append(node_new)
+                self.vertices.append(node_new)
 
                 if neighbor_index:
                     self.choose_parent(node_new, neighbor_index)
-                    self.rewire(node_new, neighbor_index)
+                    self.rewire(node_new, neighbor_index)            
 
-            
+    def on_press(self, event):
+        x, y = int(event.xdata), int(event.ydata)
+        print("Add circle obstacle at: s =", x, ",", "y =", y)
+        self.obs_add = [x, y, 2]
+        self.obs_circle.append(self.obs_add)
+        self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
 
     def new_state(self, node_start, node_goal):
         dist, theta = self.get_distance_and_angle(node_start, node_goal)
@@ -93,21 +132,17 @@ class RRTX:
         return node_new
 
     def choose_parent(self, node_new, neighbor_index):
-        cost = [self.get_new_cost(self.vertex[i], node_new) for i in neighbor_index]
+        cost = [self.get_new_cost(self.vertices[i], node_new) for i in neighbor_index]
 
         cost_min_index = neighbor_index[int(np.argmin(cost))]
-        node_new.parent = self.vertex[cost_min_index]
+        node_new.parent = self.vertices[cost_min_index]
 
     def rewire(self, node_new, neighbor_index):
         for i in neighbor_index:
-            node_neighbor = self.vertex[i]
+            node_neighbor = self.vertices[i]
 
             if self.cost(node_neighbor) > self.get_new_cost(node_new, node_neighbor):
                 node_neighbor.parent = node_new
-
-    def on_press(self, event):
-        x, y = int(event.xdata), int(event.ydata)
-        return
 
     def search_goal_parent(self):
         dist_list = [math.hypot(n.x - self.s_goal.x, n.y - self.s_goal.y) for n in self.vertex]
@@ -154,15 +189,15 @@ class RRTX:
         WRITTEN BY US
         Computes and returns the radius for the shrinking ball
         '''
-        return self.gamma * (np.log(len(self.vertex)) / len(self.vertex))**(1/self.d)
+        return self.gamma * (np.log(len(self.vertices)) / len(self.vertices))**(1/self.d)
 
     def find_near_neighbor(self, node_new):
-        n = len(self.vertex) + 1
+        n = len(self.vertices) + 1
         r = min(self.search_radius * math.sqrt((math.log(n) / n)), self.step_len)
 
-        dist_table = [math.hypot(nd.x - node_new.x, nd.y - node_new.y) for nd in self.vertex]
+        dist_table = [math.hypot(nd.x - node_new.x, nd.y - node_new.y) for nd in self.vertices]
         dist_table_index = [ind for ind in range(len(dist_table)) if dist_table[ind] <= r and
-                            not self.utils.is_collision(node_new, self.vertex[ind])]
+                            not self.utils.is_collision(node_new, self.vertices[ind])]
 
         return dist_table_index
 
