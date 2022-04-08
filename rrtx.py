@@ -121,6 +121,7 @@ class RRTX:
             node_nearest = self.nearest(node_rand)
             node_new = self.saturate(node_nearest, node_rand) # this also sets cost_from_parent and cost_from_start
 
+            # REPLACE WITH EXTEND FUNCTION
             if node_new and not self.utils.is_collision(node_nearest, node_new):
                 self.set_parent_child(node_nearest, node_new)
                 neighbour_indices = self.neighbour_indices(node_new)
@@ -129,7 +130,27 @@ class RRTX:
                 if neighbour_indices:
                     self.find_parent(node_new, neighbour_indices)
                     self.rewire(node_new, neighbour_indices)
+            # END REPLACE
+            
+            # Add call to rewire here
+            # Add call to reduce_inconsistency here
 
+    def extend(self, node_new):
+        neighbor_indices = self.neighbour_indices(node_new)
+        self.find_parent(node_new, neighbor_indices)
+        if self.parent == None:
+            return 
+        # child has already been added to parent's children
+        for u in neighbor_indices:
+            if not self.utils.is_collision(node_new, u):
+                node_new.og_neighbor.add(u)
+                u.in_neighbor.add(node_new)
+            if not self.utils.is_collision(u, node_new):
+                u.out_neighbor.add(node_new)
+                node_new.og_neighbor.add(u)
+                
+
+    
     def update_obstacles(self, event):
         x, y = int(event.xdata), int(event.ydata)
         print("Add circle obstacle at: s =", x, ",", "y =", y)
@@ -138,6 +159,8 @@ class RRTX:
         self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
         self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
         self.update_gamma() # free space volume changed, so gamma must change too
+        
+        # Add rewiring/reduce inconsistency/propogate descendants here
 
     def add_node(self, node_new):
         self.vertices.append(node_new)
@@ -175,6 +198,7 @@ class RRTX:
         child.cost_from_start = parent.cost_from_start + dist
 
     def change_parent(self, new_parent, child):
+        # CHANGE SO IT DOESNT UPDATE COST???? 
         old_parent = child.parent
         old_parent.children.remove(child)
         child.parent = new_parent
@@ -222,6 +246,7 @@ class RRTX:
         return min(self.step_len, self.gamma * (np.log(len(self.vertices)) / len(self.vertices))**(1/self.d))
 
     def neighbour_indices(self, node):
+        
         nodes_coor = np.array(self.vertices_coor)
         node_coor = np.array([node.x, node.y]).reshape((1,2))
         dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
