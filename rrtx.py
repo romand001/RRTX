@@ -16,6 +16,24 @@ class Node:
         self.children = set([])
         self.cost_from_parent = 0.0
         self.cost_from_start = 0.0
+        # each node has original neighbors, running (new) in/out neighbors, 
+        # AND parent, and in-child set. moving through parent/child should always yield shortest path
+        self.og_neighbor = set([])
+        self.out_neighbor = set([])
+        self.in_neighbor = set([])
+    
+    def all_out_neighbors(self):
+        return self.out_neighbor.union(self.og_neighbor)
+    
+    def all_in_neighbors(self):
+        return self.out_neighbor.union(self.og_neighbor)
+   
+    def make_parent(self, u):
+        # u is the parent node
+        if old_parent := self.parent:
+            old_parent.children.remove(self)
+        self.parent = u
+        u.children.add(self)
 
 class Edge:
     def __init__(self, n_p, n_c):
@@ -227,6 +245,13 @@ class RRTX:
         path.append([node.x, node.y])
 
         return path
+    
+    def cull_neighbors(self, v):
+        for u in v.out_neighbors:
+            if (self.get_distance(v,u) > self.search_radius) and (v.parent != u):
+                v.out_neighbors.remove(u)
+                u.in_neighbors.remove(v)
+    
 
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
