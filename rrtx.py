@@ -14,8 +14,9 @@ class Node:
         self.y = n[1]
         self.parent = None
         self.children = set([])
-        self.cost_from_parent = 0.0
-        self.cost_from_start = 0.0
+        self.cost_to_parent = 0.0
+        self.cost_to_goal = 0.0
+        self.lmc = 0.0
         # each node has original neighbors, running (new) in/out neighbors, 
         # AND parent, and in-child set. moving through parent/child should always yield shortest path
         self.og_neighbor = set([])
@@ -33,16 +34,39 @@ class Node:
         if old_parent := self.parent:
             old_parent.children.remove(self)
         self.parent = new_parent
-        self.cost_from_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
-        self.cost_from_start = new_parent.cost_from_start + self.cost_from_parent
+        self.cost_to_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
+        self.cost_to_goal = new_parent.cost_to_goal + self.cost_to_parent
         new_parent.children.add(self)
         if old_parent:
             self.update_cost_recursive()
 
     def update_cost_recursive(self):
-        self.cost_from_start = self.parent.cost_from_start + self.cost_from_parent
+        self.cost_to_goal = self.parent.cost_to_goal + self.cost_to_parent
         for child in self.children:
             child.update_cost_recursive()
+
+    def cull_neighbors(self, r):
+        # Algorithm 3
+        for u in self.out_neighbor:
+            # switched order of conditions in if statement to be faster
+            if self.parent != u and r < self.distance(u):
+                self.out_neighbor.remove(u)
+                u.in_neighbor.remove(self)
+
+    def update_LMC(self, orphan_nodes, r):
+        # Algorithm 14
+        # pass in orphan nodes from main code, make sure the set is maintained properly
+        self.cull_neighbors(r)
+        # list of tuples: ( u, d_pi(v,u)+lmc(u) )
+        lmcs = [(u, self.distance(u) + u.lmc) for u in (self.all_out_neighbors() - orphan_nodes) if u.parent != self]
+        if not lmcs:
+            return
+        p_prime, self.lmc = min(lmcs, key=lambda x: x[1]) # pretty sure they forgot to set the LMC in Algorithm 14, but they should have
+        self.set_parent(p_prime) # not sure if we need this or literally just set the parent manually without propagating
+
+    def distance(self, other):
+        return math.hypot(self.x - other.x, self.y - other.y)
+
 
 
 class RRTX:
@@ -57,8 +81,7 @@ class RRTX:
         self.iter_max = iter_max
         self.vertices = [self.s_start]
         self.vertices_coor = [[self.s_start.x, self.s_start.y]] # for faster nearest neighbor lookup
-        self.edges = []
-        self.path = []
+        self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
@@ -122,7 +145,7 @@ class RRTX:
 
             node_rand = self.random_node(self.goal_sample_rate)
             node_nearest = self.nearest(node_rand)
-            node_new = self.saturate(node_nearest, node_rand) # this also sets cost_from_parent and cost_from_start
+            node_new = self.saturate(node_nearest, node_rand) # this also sets cost_to_parent and cost_to_goal
 
             # REPLACE WITH EXTEND FUNCTION
             if node_new and not self.utils.is_collision(node_nearest, node_new):
@@ -178,7 +201,7 @@ class RRTX:
         costs = [self.get_new_cost(self.vertices[i], node_new) for i in neighbor_indices]
         min_cost_index = int(np.argmin(costs))
         min_cost_neighbor_index = neighbor_indices[min_cost_index]
-        if costs[min_cost_index] < node_new.cost_from_start:
+        if costs[min_cost_index] < node_new.cost_to_goal:
             node_new.set_parent(new_parent=self.vertices[min_cost_neighbor_index])
 
     def rewire(self, node_new, neighbor_indices):
@@ -186,12 +209,12 @@ class RRTX:
             node_neighbor = self.vertices[i]
 
             new_cost = self.get_new_cost(node_new, node_neighbor)
-            if new_cost < node_neighbor.cost_from_start:
+            if new_cost < node_neighbor.cost_to_goal:
                 node_neighbor.set_parent(new_parent=node_new)
 
     def get_new_cost(self, node_start, node_end):
         dist = self.get_distance(node_start, node_end)
-        return node_start.cost_from_start + dist
+        return node_start.cost_to_goal + dist
 
     def random_node(self, goal_sample_rate):
         delta = self.utils.delta
