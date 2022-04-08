@@ -13,15 +13,9 @@ class Node:
         self.x = n[0]
         self.y = n[1]
         self.parent = None
-
-    def __eq__(self, other):
-        '''
-        WRITTEN BY US
-        overrides == operator to compare node coordinates instead of object id's
-        '''
-        if isinstance(other, Node):
-            return (self.x - other.x) ** 2 + (self.y - other.y) ** 2 < 1e-6
-        return False
+        self.children = set([])
+        self.cost_from_parent = 0.0
+        self.cost_from_start = 0.0
 
 class Edge:
     def __init__(self, n_p, n_c):
@@ -40,6 +34,7 @@ class RRTX:
         self.search_radius = search_radius
         self.iter_max = iter_max
         self.vertices = [self.s_start]
+        self.vertices_coor = [[self.s_start.x, self.s_start.y]] # for faster nearest neighbour lookup
         self.edges = []
         self.path = []
 
@@ -73,7 +68,7 @@ class RRTX:
     def planning(self):
 
         # set up event handling
-        self.fig.canvas.mpl_connect('button_press_event', self.on_press)
+        self.fig.canvas.mpl_connect('button_press_event', self.update_obstacles)
 
         # animation stuff
         plt.gca().set_aspect('equal', adjustable='box')
@@ -87,80 +82,99 @@ class RRTX:
 
             self.search_radius = self.shrinking_ball_radius()
 
-            # add like this for now
-            for node in self.vertices:
-                if node.parent:
-                    self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
+            # animate
+            if i % 10 == 0:
+                # add like this for now
+                self.edges = []
+                for node in self.vertices:
+                    if node.parent:
+                        self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
+                self.edge_col.set_segments(np.array(self.edges))
+                self.fig.canvas.restore_region(self.bg)
+                self.plotting.plot_env(self.ax)
+                self.ax.draw_artist(self.edge_col)
+                self.fig.canvas.blit(self.ax.bbox)
+                self.fig.canvas.flush_events()
 
-            # animation
-            self.edge_col.set_segments(np.array(self.edges))
-            self.fig.canvas.restore_region(self.bg)
-            self.plotting.plot_env(self.ax)
-            self.ax.draw_artist(self.edge_col)
-            self.fig.canvas.blit(self.ax.bbox)
-            self.fig.canvas.flush_events()
+            # update robot position if it's moving
+            # UNIMPLEMENTED
 
+            node_rand = self.random_node(self.goal_sample_rate)
+            node_nearest = self.nearest(node_rand)
+            node_new = self.saturate(node_nearest, node_rand) # this also sets cost_from_parent and cost_from_start
 
-            node_rand = self.generate_random_node(self.goal_sample_rate)
-            node_near = self.nearest_neighbor(self.vertices, node_rand)
-            node_new = self.new_state(node_near, node_rand)
+            if node_new and not self.utils.is_collision(node_nearest, node_new):
+                self.set_parent_child(node_nearest, node_new)
+                neighbour_indices = self.neighbour_indices(node_new)
+                self.add_node(node_new)
 
-            if node_new and not self.utils.is_collision(node_near, node_new):
-                neighbor_index = self.find_near_neighbor(node_new)
-                self.vertices.append(node_new)
+                if neighbour_indices:
+                    self.find_parent(node_new, neighbour_indices)
+                    self.rewire(node_new, neighbour_indices)
 
-                if neighbor_index:
-                    self.choose_parent(node_new, neighbor_index)
-                    self.rewire(node_new, neighbor_index)            
-
-    def on_press(self, event):
+    def update_obstacles(self, event):
         x, y = int(event.xdata), int(event.ydata)
         print("Add circle obstacle at: s =", x, ",", "y =", y)
         self.obs_add = [x, y, 2]
         self.obs_circle.append(self.obs_add)
         self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
+        self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
+        self.update_gamma() # free space volume changed, so gamma must change too
 
-    def new_state(self, node_start, node_goal):
+    def add_node(self, node_new):
+        self.vertices.append(node_new)
+        self.vertices_coor.append([node_new.x, node_new.y])
+
+    def saturate(self, node_start, node_goal):
         dist, theta = self.get_distance_and_angle(node_start, node_goal)
 
         dist = min(self.step_len, dist)
         node_new = Node((node_start.x + dist * math.cos(theta),
                          node_start.y + dist * math.sin(theta)))
 
-        node_new.parent = node_start
-
         return node_new
 
-    def choose_parent(self, node_new, neighbor_index):
-        cost = [self.get_new_cost(self.vertices[i], node_new) for i in neighbor_index]
+    def find_parent(self, node_new, neighbour_indices):
+        costs = [self.get_new_cost(self.vertices[i], node_new) for i in neighbour_indices]
+        min_cost_index = int(np.argmin(costs))
+        min_cost_neighbour_index = neighbour_indices[min_cost_index]
+        if costs[min_cost_index] < node_new.cost_from_start:
+            self.change_parent(self.vertices[min_cost_neighbour_index], node_new)
 
-        cost_min_index = neighbor_index[int(np.argmin(cost))]
-        node_new.parent = self.vertices[cost_min_index]
+    def rewire(self, node_new, neighbour_indices):
+        for i in neighbour_indices:
+            node_neighbour = self.vertices[i]
 
-    def rewire(self, node_new, neighbor_index):
-        for i in neighbor_index:
-            node_neighbor = self.vertices[i]
+            new_cost = self.get_new_cost(node_new, node_neighbour)
+            if new_cost < node_neighbour.cost_from_start:
+                self.change_parent(node_new, node_neighbour)
 
-            if self.cost(node_neighbor) > self.get_new_cost(node_new, node_neighbor):
-                node_neighbor.parent = node_new
+    def set_parent_child(self, parent, child):
+        child.parent = parent
+        parent.children.add(child)
+        dist = self.get_distance(child, parent)
+        child.cost_from_parent = dist
+        child.cost_from_start = parent.cost_from_start + dist
 
-    def search_goal_parent(self):
-        dist_list = [math.hypot(n.x - self.s_goal.x, n.y - self.s_goal.y) for n in self.vertex]
-        node_index = [i for i in range(len(dist_list)) if dist_list[i] <= self.step_len]
+    def change_parent(self, new_parent, child):
+        old_parent = child.parent
+        old_parent.children.remove(child)
+        child.parent = new_parent
+        child.cost_from_parent = self.get_distance(child, new_parent)
+        new_parent.children.add(child)
+        self.update_costs_recursive(child)
 
-        if len(node_index) > 0:
-            cost_list = [dist_list[i] + self.cost(self.vertex[i]) for i in node_index
-                         if not self.utils.is_collision(self.vertex[i], self.s_goal)]
-            return node_index[int(np.argmin(cost_list))]
-
-        return len(self.vertex) - 1
+    def update_costs_recursive(self, node):
+        if node.parent:
+            node.cost_from_start = node.parent.cost_from_start + node.cost_from_parent
+            for child in node.children:
+                self.update_costs_recursive(child)
 
     def get_new_cost(self, node_start, node_end):
-        dist, _ = self.get_distance_and_angle(node_start, node_end)
+        dist = self.get_distance(node_start, node_end)
+        return node_start.cost_from_start + dist
 
-        return self.cost(node_start) + dist
-
-    def generate_random_node(self, goal_sample_rate):
+    def random_node(self, goal_sample_rate):
         delta = self.utils.delta
 
         if np.random.random() > goal_sample_rate:
@@ -171,7 +185,6 @@ class RRTX:
 
     def update_gamma(self):
         '''
-        WRITTEN BY US
         computes and updates gamma required for shrinking ball radius
         - gamma depends on the free space volume, so changes when obstacles are added or removed
         - this assumes that obstacles don't overlap
@@ -186,50 +199,23 @@ class RRTX:
 
     def shrinking_ball_radius(self):
         '''
-        WRITTEN BY US
         Computes and returns the radius for the shrinking ball
         '''
-        return self.gamma * (np.log(len(self.vertices)) / len(self.vertices))**(1/self.d)
+        return min(self.step_len, self.gamma * (np.log(len(self.vertices)) / len(self.vertices))**(1/self.d))
 
-    def find_near_neighbor(self, node_new):
-        n = len(self.vertices) + 1
-        r = min(self.search_radius * math.sqrt((math.log(n) / n)), self.step_len)
-
-        dist_table = [math.hypot(nd.x - node_new.x, nd.y - node_new.y) for nd in self.vertices]
-        dist_table_index = [ind for ind in range(len(dist_table)) if dist_table[ind] <= r and
-                            not self.utils.is_collision(node_new, self.vertices[ind])]
-
+    def neighbour_indices(self, node):
+        nodes_coor = np.array(self.vertices_coor)
+        node_coor = np.array([node.x, node.y]).reshape((1,2))
+        dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
+        dist_table_index = [ind for ind in range(len(dist_table)) if dist_table[ind] <= self.search_radius and 
+                            self.vertices[ind] != node.parent and not self.utils.is_collision(node, self.vertices[ind])]
         return dist_table_index
 
-    @staticmethod
-    def nearest_neighbor(node_list, n):
-        return node_list[int(np.argmin([math.hypot(nd.x - n.x, nd.y - n.y)
-                                        for nd in node_list]))]
-
-    @staticmethod
-    def cost(node_p):
-        node = node_p
-        cost = 0.0
-
-        while node.parent:
-            cost += math.hypot(node.x - node.parent.x, node.y - node.parent.y)
-            node = node.parent
-
-        return cost
-
-    def update_cost(self, parent_node):
-        OPEN = queue.QueueFIFO()
-        OPEN.put(parent_node)
-
-        while not OPEN.empty():
-            node = OPEN.get()
-
-            if len(node.child) == 0:
-                continue
-
-            for node_c in node.child:
-                node_c.Cost = self.get_new_cost(node, node_c)
-                OPEN.put(node_c)
+    def nearest(self, node):
+        nodes_coor = np.array(self.vertices_coor)
+        node_coor = np.array([node.x, node.y])
+        dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
+        return self.vertices[int(np.argmin(dist_table))]
 
     def extract_path(self, node_end):
         path = [[self.s_goal.x, self.s_goal.y]]
@@ -248,12 +234,17 @@ class RRTX:
         dy = node_end.y - node_start.y
         return math.hypot(dx, dy), math.atan2(dy, dx)
 
+    @staticmethod
+    def get_distance(node_start, node_end):
+        dx = node_end.x - node_start.x
+        dy = node_end.y - node_start.y
+        return math.hypot(dx, dy)
 
 def main():
     x_start = (18, 8)  # Starting node
     x_goal = (37, 18)  # Goal node
 
-    rrtx = RRTX(x_start, x_goal, 10, 0.10, 20, 10000)
+    rrtx = RRTX(x_start, x_goal, 5.0, 0.10, 20, 10000)
     rrtx.planning()
 
 
