@@ -1,12 +1,13 @@
 import os
 import sys
 import math
+import heapq
+import functools
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
 import env, plotting, utils, queue
-
 
 class Node:
     def __init__(self, n):
@@ -17,12 +18,13 @@ class Node:
         self.cost_to_parent = 0.0
         self.cost_to_goal = 0.0
         self.lmc = 0.0
+        self.infinite_dist_nodes = set([]) # set of nodes u where d_pi(v,u) has been set to infinity after adding an obstacle
         # each node has original neighbors, running (new) in/out neighbors, 
         # AND parent, and in-child set. moving through parent/child should always yield shortest path
         self.og_neighbor = set([])
         self.out_neighbor = set([])
         self.in_neighbor = set([])
-    
+
     def all_out_neighbors(self):
         return self.out_neighbor.union(self.og_neighbor)
     
@@ -65,8 +67,27 @@ class Node:
         self.set_parent(p_prime) # not sure if we need this or literally just set the parent manually without propagating
 
     def distance(self, other):
-        return math.hypot(self.x - other.x, self.y - other.y)
+        return np.inf if other in self.infinite_dist_nodes else math.hypot(self.x - other.x, self.y - other.y)
 
+@functools.total_ordering
+def ComparableNode(Node):
+    '''  
+    This is a wrapper class for the Node class to provide a key comparison 
+    for the priority queue
+    '''
+    def __gt__(self, other):
+        '''  
+        Key for RRTX priority queue is ordered pair ( min(g(v), lmc(v)), g(v) )
+        (a, b) > (c, d) iff not a < c or (a == c and b < d)
+        '''
+        a = min(self.cost_to_goal, self.lmc)
+        c = min(other.cost_to_goal, other.lmc)
+        b = self.cost_to_goal
+        d = other.cost_to_goal
+        return not (a < c or (a == c and b < d))
+    
+    def __eq__(self, other):
+        return min(self.cost_to_goal, self.lmc) == min(other.cost_to_goal, other.lmc)
 
 
 class RRTX:
@@ -79,9 +100,10 @@ class RRTX:
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
         self.iter_max = iter_max
-        self.vertices = [self.s_start]
         self.vertices_coor = [[self.s_start.x, self.s_start.y]] # for faster nearest neighbor lookup
+        self.tree_nodes = [self.s_start] # this is V_T in the paper
         self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
+        self.Q = [] # priority queue of ComparableNodes
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
@@ -130,7 +152,7 @@ class RRTX:
             if i % 10 == 0:
                 # add like this for now
                 self.edges = []
-                for node in self.vertices:
+                for node in self.tree_nodes:
                     if node.parent:
                         self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
                 self.edge_col.set_segments(np.array(self.edges))
@@ -177,17 +199,38 @@ class RRTX:
                 
     def update_obstacles(self, event):
         x, y = int(event.xdata), int(event.ydata)
-        print("Add circle obstacle at: s =", x, ",", "y =", y)
-        self.obs_add = [x, y, 2]
-        self.obs_circle.append(self.obs_add)
-        self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
-        self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle)
-        self.update_gamma() # free space volume changed, so gamma must change too
+        self.add_new_obstacle([x, y, 2])
         
-        # Add rewiring/reduce inconsistency/propogate descendants here
+        # Add rewiring/reduce inconsistency/propagate descendants here
+
+    def add_new_obstacle(self, obs):
+        print("Add circle obstacle at: s =", x, ",", "y =", y)
+        self.obs_circle.append(obs)
+        self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
+        self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking
+        self.update_gamma() # free space volume changed, so gamma must change too
+
+        # get all edges that intersect the new circle obstacle
+        # DOES EDGE SET "E" INCLUDE EDGES THAT HAVE BEEN REMOVED PREVIOUSLY??? NOT ACCOUNTING RIGHT NOW
+        E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and utils.is_intersect_circle(*utils.get_ray(v, u), obs[:2], obs[2])]
+        for v, u in E_O:
+            v.infinite_dist_nodes.add(u)
+            u.infinite_dist_nodes.add(v)
+            if v.parent == u: # this check is currently irrelevant since u is always v's parent
+                self.verify_orphan(v)
+                # should theoretically check if the robot is on this edge now, but we do not
+
+        heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
+
+    def verify_orphan(self, v):
+        comparable_v = ComparableNode(v)
+        if comparable_v in self.Q:
+            self.Q.remove(comparable_v) # this ruins heap, reheapify after all orphans verified
+            self.orphan_nodes.add(v)
+
 
     def add_node(self, node_new):
-        self.vertices.append(node_new)
+        self.tree_nodes.append(node_new)
         self.vertices_coor.append([node_new.x, node_new.y])
 
     def saturate(self, node_start, node_goal):
@@ -198,15 +241,15 @@ class RRTX:
         return node_new
 
     def find_parent(self, node_new, neighbor_indices):
-        costs = [self.get_new_cost(self.vertices[i], node_new) for i in neighbor_indices]
+        costs = [self.get_new_cost(self.tree_nodes[i], node_new) for i in neighbor_indices]
         min_cost_index = int(np.argmin(costs))
         min_cost_neighbor_index = neighbor_indices[min_cost_index]
         if costs[min_cost_index] < node_new.cost_to_goal:
-            node_new.set_parent(new_parent=self.vertices[min_cost_neighbor_index])
+            node_new.set_parent(new_parent=self.tree_nodes[min_cost_neighbor_index])
 
     def rewire(self, node_new, neighbor_indices):
         for i in neighbor_indices:
-            node_neighbor = self.vertices[i]
+            node_neighbor = self.tree_nodes[i]
 
             new_cost = self.get_new_cost(node_new, node_neighbor)
             if new_cost < node_neighbor.cost_to_goal:
@@ -243,7 +286,7 @@ class RRTX:
         '''
         Computes and returns the radius for the shrinking ball
         '''
-        return min(self.step_len, self.gamma * (np.log(len(self.vertices)) / len(self.vertices))**(1/self.d))
+        return min(self.step_len, self.gamma * (np.log(len(self.tree_nodes)) / len(self.tree_nodes))**(1/self.d))
 
     def neighbor_indices(self, node):
         
@@ -251,14 +294,14 @@ class RRTX:
         node_coor = np.array([node.x, node.y]).reshape((1,2))
         dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
         dist_table_index = [ind for ind in range(len(dist_table)) if dist_table[ind] <= self.search_radius and 
-                            self.vertices[ind] != node.parent and not self.utils.is_collision(node, self.vertices[ind])]
+                            self.tree_nodes[ind] != node.parent and not self.utils.is_collision(node, self.tree_nodes[ind])]
         return dist_table_index
 
     def nearest(self, node):
         nodes_coor = np.array(self.vertices_coor)
         node_coor = np.array([node.x, node.y])
         dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
-        return self.vertices[int(np.argmin(dist_table))]
+        return self.tree_nodes[int(np.argmin(dist_table))]
 
     def extract_path(self, node_end):
         path = [[self.s_goal.x, self.s_goal.y]]
