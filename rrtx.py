@@ -223,10 +223,28 @@ class RRTX:
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
     def verify_orphan(self, v):
-        comparable_v = ComparableNode(v)
-        if comparable_v in self.Q:
-            self.Q.remove(comparable_v) # this ruins heap, reheapify after all orphans verified
-            self.orphan_nodes.add(v)
+        # is there a better way to do this? maybe something O(logN)?
+        for comparable_node in self.Q:
+            if comparable_node.node == v:
+                self.Q.remove(comparable_node)
+                self.orphan_nodes.add(v)
+                break
+
+    def propagate_descendants(self):
+        orphan_index = 0
+        while orphan_index < len(self.orphan_nodes):
+            self.orphan_nodes = self.orphan_nodes + self.orphan_nodes[orphan_index].children
+            orphan_index += 1
+        
+        orphan_index = 0
+        while orphan_index < len(self.orphan_nodes):
+            v = self.orphan_nodes[orphan_index]
+            for u in (v.all_out_neighbors() + set([v.parent])) - self.orphan_nodes:
+                u.cost_to_goal = np.inf # is this the right way to do it?
+                # VERIFY QUEUE HERE
+            orphan_index += 1
+
+        # TO BE CONTINUED
 
 
     def add_node(self, node_new):
