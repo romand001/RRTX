@@ -1,3 +1,5 @@
 /__pycache__
 /reference\ algorithms/rrt_2D/__pycache__
 /reference\ algorithms/rrt_3D/__pycache__
+/.venv
+/.idea
