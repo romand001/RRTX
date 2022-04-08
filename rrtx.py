@@ -28,18 +28,22 @@ class Node:
     def all_in_neighbors(self):
         return self.out_neighbor.union(self.og_neighbor)
    
-    def make_parent(self, u):
-        # u is the parent node
+    def set_parent(self, new_parent):
+        # if a parent exists already
         if old_parent := self.parent:
             old_parent.children.remove(self)
-        self.parent = u
-        u.children.add(self)
+        self.parent = new_parent
+        self.cost_from_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
+        self.cost_from_start = new_parent.cost_from_start + self.cost_from_parent
+        new_parent.children.add(self)
+        if old_parent:
+            self.update_cost_recursive()
 
-class Edge:
-    def __init__(self, n_p, n_c):
-        self.parent = n_p
-        self.child = n_c
-        self.flag = "VALID"
+    def update_cost_recursive(self):
+        self.cost_from_start = self.parent.cost_from_start + self.cost_from_parent
+        for child in self.children:
+            child.update_cost_recursive()
+
 
 class RRTX:
     def __init__(self, x_start, x_goal, step_len,
@@ -52,7 +56,7 @@ class RRTX:
         self.search_radius = search_radius
         self.iter_max = iter_max
         self.vertices = [self.s_start]
-        self.vertices_coor = [[self.s_start.x, self.s_start.y]] # for faster nearest neighbour lookup
+        self.vertices_coor = [[self.s_start.x, self.s_start.y]] # for faster nearest neighbor lookup
         self.edges = []
         self.path = []
 
@@ -81,7 +85,6 @@ class RRTX:
         self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
         self.gamma_FOS = 1.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
         self.update_gamma() # initialize gamma
-
 
     def planning(self):
 
@@ -123,20 +126,20 @@ class RRTX:
 
             # REPLACE WITH EXTEND FUNCTION
             if node_new and not self.utils.is_collision(node_nearest, node_new):
-                self.set_parent_child(node_nearest, node_new)
-                neighbour_indices = self.neighbour_indices(node_new)
+                node_new.set_parent(new_parent=node_nearest)
+                neighbor_indices = self.neighbor_indices(node_new)
                 self.add_node(node_new)
 
-                if neighbour_indices:
-                    self.find_parent(node_new, neighbour_indices)
-                    self.rewire(node_new, neighbour_indices)
+                if neighbor_indices:
+                    self.find_parent(node_new, neighbor_indices)
+                    self.rewire(node_new, neighbor_indices)
             # END REPLACE
             
             # Add call to rewire here
             # Add call to reduce_inconsistency here
 
     def extend(self, node_new):
-        neighbor_indices = self.neighbour_indices(node_new)
+        neighbor_indices = self.neighbor_indices(node_new)
         self.find_parent(node_new, neighbor_indices)
         if self.parent == None:
             return 
@@ -149,8 +152,6 @@ class RRTX:
                 u.out_neighbor.add(node_new)
                 node_new.og_neighbor.add(u)
                 
-
-    
     def update_obstacles(self, event):
         x, y = int(event.xdata), int(event.ydata)
         print("Add circle obstacle at: s =", x, ",", "y =", y)
@@ -168,49 +169,25 @@ class RRTX:
 
     def saturate(self, node_start, node_goal):
         dist, theta = self.get_distance_and_angle(node_start, node_goal)
-
         dist = min(self.step_len, dist)
         node_new = Node((node_start.x + dist * math.cos(theta),
                          node_start.y + dist * math.sin(theta)))
-
         return node_new
 
-    def find_parent(self, node_new, neighbour_indices):
-        costs = [self.get_new_cost(self.vertices[i], node_new) for i in neighbour_indices]
+    def find_parent(self, node_new, neighbor_indices):
+        costs = [self.get_new_cost(self.vertices[i], node_new) for i in neighbor_indices]
         min_cost_index = int(np.argmin(costs))
-        min_cost_neighbour_index = neighbour_indices[min_cost_index]
+        min_cost_neighbor_index = neighbor_indices[min_cost_index]
         if costs[min_cost_index] < node_new.cost_from_start:
-            self.change_parent(self.vertices[min_cost_neighbour_index], node_new)
+            node_new.set_parent(new_parent=self.vertices[min_cost_neighbor_index])
 
-    def rewire(self, node_new, neighbour_indices):
-        for i in neighbour_indices:
-            node_neighbour = self.vertices[i]
+    def rewire(self, node_new, neighbor_indices):
+        for i in neighbor_indices:
+            node_neighbor = self.vertices[i]
 
-            new_cost = self.get_new_cost(node_new, node_neighbour)
-            if new_cost < node_neighbour.cost_from_start:
-                self.change_parent(node_new, node_neighbour)
-
-    def set_parent_child(self, parent, child):
-        child.parent = parent
-        parent.children.add(child)
-        dist = self.get_distance(child, parent)
-        child.cost_from_parent = dist
-        child.cost_from_start = parent.cost_from_start + dist
-
-    def change_parent(self, new_parent, child):
-        # CHANGE SO IT DOESNT UPDATE COST???? 
-        old_parent = child.parent
-        old_parent.children.remove(child)
-        child.parent = new_parent
-        child.cost_from_parent = self.get_distance(child, new_parent)
-        new_parent.children.add(child)
-        self.update_costs_recursive(child)
-
-    def update_costs_recursive(self, node):
-        if node.parent:
-            node.cost_from_start = node.parent.cost_from_start + node.cost_from_parent
-            for child in node.children:
-                self.update_costs_recursive(child)
+            new_cost = self.get_new_cost(node_new, node_neighbor)
+            if new_cost < node_neighbor.cost_from_start:
+                node_neighbor.set_parent(new_parent=node_new)
 
     def get_new_cost(self, node_start, node_end):
         dist = self.get_distance(node_start, node_end)
@@ -245,7 +222,7 @@ class RRTX:
         '''
         return min(self.step_len, self.gamma * (np.log(len(self.vertices)) / len(self.vertices))**(1/self.d))
 
-    def neighbour_indices(self, node):
+    def neighbor_indices(self, node):
         
         nodes_coor = np.array(self.vertices_coor)
         node_coor = np.array([node.x, node.y]).reshape((1,2))
@@ -277,7 +254,6 @@ class RRTX:
                 v.out_neighbors.remove(u)
                 u.in_neighbors.remove(v)
     
-
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
         dx = node_end.x - node_start.x
