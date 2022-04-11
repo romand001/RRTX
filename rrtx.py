@@ -2,6 +2,8 @@ import os
 import sys
 import math
 import heapq
+from collections.abc import Sequence
+import kdtree
 # import functools
 # from queue import PriorityQueue
 import numpy as np
@@ -10,31 +12,51 @@ from matplotlib.collections import LineCollection
 
 import env, plotting, utils, queue
 
-class Node:
-    def __init__(self, n):
+class Node(Sequence):
+    # inherits from Sequence to support indexing and thus kd-tree support
+    def __init__(self, n, cost_to_goal=np.inf):
+        self.n = n # make iterable for kd-tree insertion
         self.x = n[0]
         self.y = n[1]
         self.parent = None
         self.children = set([])
-        self.cost_to_parent = 0.0
-        self.cost_to_goal = 0.0
-        self.lmc = 0.0
+        self.cost_to_parent = np.inf
+        self.cost_to_goal = cost_to_goal
+        self.lmc = np.inf
         self.infinite_dist_nodes = set([]) # set of nodes u where d_pi(v,u) has been set to infinity after adding an obstacle
         # each node has original neighbors, running (new) in/out neighbors, 
         # AND parent, and in-child set. moving through parent/child should always yield shortest path
-        self.og_neighbor = set([])
-        self.out_neighbor = set([])
-        self.in_neighbor = set([])
+        # I CHANGED THIS BECAUSE THERE EXIST BOTH INGOING AND OUTGOING OG NEIGHBORS
+        # self.og_neighbor = set([])
+        # self.out_neighbor = set([])
+        # self.in_neighbor = set([])
+        self.N_o_plus = set([]) # outgoing original neighbours
+        self.N_o_minus = set([]) # incoming original neighbours
+        self.N_r_plus = set([]) # outgoing running in neighbours
+        self.N_r_minus = set([]) # incoming running in neighbours
 
     def __eq__(self, other):
         # this is required for the checking if a node is "in" self.Q, but idk what the condition should be
         return (self.x - other.x)**2 + (self.y - other.y)**2 < 1e-6
 
+    def __hash__(self):
+        # this is required for storing Nodes to sets
+        return hash(self.n)
+
+    def __getitem__(self, i):
+        # this is required for kd-tree insertion
+        return self.n[i]
+    
+    def __len__(self):
+        # this is required for kd-tree insertion
+        return 2
+
+
     def all_out_neighbors(self):
-        return self.out_neighbor.union(self.og_neighbor)
+        return self.N_o_plus.union(self.N_r_plus)
     
     def all_in_neighbors(self):
-        return self.out_neighbor.union(self.og_neighbor)
+        return self.N_o_minus.union(self.N_r_minus)
    
     def set_parent(self, new_parent):
         # if a parent exists already
@@ -44,8 +66,8 @@ class Node:
         self.cost_to_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
         self.cost_to_goal = new_parent.cost_to_goal + self.cost_to_parent
         new_parent.children.add(self)
-        if old_parent:
-            self.update_cost_recursive()
+        # if old_parent:
+        #     self.update_cost_recursive()
 
     def update_cost_recursive(self):
         self.cost_to_goal = self.parent.cost_to_goal + self.cost_to_parent
@@ -60,10 +82,10 @@ class Node:
         for u in self.out_neighbor:
             # switched order of conditions in if statement to be faster
             if self.parent != u and r < self.distance(u):
-                self.out_neighbor.remove(u)
-                u.in_neighbor.remove(self)
+                self.N_r_plus.remove(u)
+                u.N_r_minus.remove(self)
 
-    def update_LMC(self, orphan_nodes, r):
+    def update_LMC(self, orphan_nodes, r, epsilon):
         # Algorithm 14
         # pass in orphan nodes from main code, make sure the set is maintained properly
         self.cull_neighbors(r)
@@ -77,76 +99,21 @@ class Node:
     def distance(self, other):
         return np.inf if other in self.infinite_dist_nodes else math.hypot(self.x - other.x, self.y - other.y)
 
-# @functools.total_ordering
-# class ComparableNode(Node):
-#     '''  
-#     This is a wrapper class for the Node class to provide a key comparison 
-#     for the priority queue
-#     '''
-#     def __gt__(self, other):
-#         '''  
-#         Key for RRTX priority queue is ordered pair ( min(g(v), lmc(v)), g(v) )
-#         (a, b) > (c, d) iff not a < c or (a == c and b < d)
-#         '''
-#         a = min(self.cost_to_goal, self.lmc)
-#         c = min(other.cost_to_goal, other.lmc)
-#         b = self.cost_to_goal
-#         d = other.cost_to_goal
-#         return not (a < c or (a == c and b < d))
-    
-#     def __eq__(self, other):
-#         return min(self.cost_to_goal, self.lmc) == min(other.cost_to_goal, other.lmc)
-
-# class _Wrapper:
-#     def __init__(self, item, key):
-#         self.item = item
-#         self.key = key
-
-#     def __lt__(self, other):
-#         return self.key(self.item) < other.key(other.item)
-
-#     def __eq__(self, other):
-#         return self.key(self.item) == other.key(other.item)
-
-
-# class KeyPriorityQueue(PriorityQueue):
-#     def __init__(self, key):
-#         self.key = key
-#         super().__init__()
-
-#     def _get(self):
-#         wrapper = super()._get()
-#         return wrapper.item
-
-#     def _put(self, item):
-#         super()._put(_Wrapper(item, self.key))
-
-# def pq_comparator(node1: Node, node2: Node) -> int:
-#     a = min(node1.cost_to_goal, node1.lmc)
-#     c = min(node2.cost_to_goal, node2.lmc)
-#     b = node1.cost_to_goal
-#     d = node2.cost_to_goal
-#     if a < c or (a == c and b < d):
-#         return 1
-#     elif a > c or (a == c and b > d):
-#         return -1
-#     else:
-#         return 0
-    
 
 class RRTX:
     def __init__(self, x_start, x_goal, step_len, epsilon, 
-                 goal_sample_rate, search_radius, iter_max):
+                 start_sample_rate, iter_max):
         self.s_start = Node(x_start)
-        self.s_goal = Node(x_goal)
+        self.s_goal = Node(x_goal, cost_to_goal=0.0)
         self.s_bot = self.s_start
         self.step_len = step_len
         self.epsilon = epsilon
-        self.goal_sample_rate = goal_sample_rate
-        self.search_radius = search_radius
+        self.start_sample_rate = start_sample_rate
+        self.search_radius = 0
         self.iter_max = iter_max
-        self.vertices_coor = [[self.s_start.x, self.s_start.y]] # for faster nearest neighbor lookup
-        self.tree_nodes = [self.s_start] # this is V_T in the paper
+        # self.vertices_coor = [[self.s_goal.x, self.s_goal.y]] # for faster nearest neighbor lookup
+        self.kd_tree = kdtree.create([self.s_goal])
+        self.tree_nodes = [self.s_goal] # this is V_T in the paper
         self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
         self.Q = [] # priority queue of ComparableNodes
         # self.Q = KeyPriorityQueue(key=cmp_to_key(pq_comparator))
@@ -174,10 +141,13 @@ class RRTX:
         # for gamma computation
         self.d = 2 # dimension of the state space
         self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
-        self.gamma_FOS = 1.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
+        self.gamma_FOS = 2.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
         self.update_gamma() # initialize gamma
 
     def planning(self):
+
+        # set seed for reproducibility
+        np.random.seed(0)
 
         # set up event handling
         self.fig.canvas.mpl_connect('button_press_event', self.update_obstacles)
@@ -211,47 +181,44 @@ class RRTX:
             # update robot position if it's moving
             # UNIMPLEMENTED
 
-            node_rand = self.random_node(self.goal_sample_rate)
-            node_nearest = self.nearest(node_rand)
-            node_new = self.saturate(node_nearest, node_rand) # this also sets cost_to_parent and cost_to_goal
+            v = self.random_node()
+            v_nearest = self.nearest(v)
+            v = self.saturate(v_nearest, v) # this also sets cost_to_parent and cost_to_goal
 
-            # REPLACE WITH EXTEND FUNCTION
-            if node_new and not self.utils.is_collision(node_nearest, node_new):
-                node_new.set_parent(new_parent=node_nearest)
-                neighbor_indices = self.neighbor_indices(node_new)
-                self.add_node(node_new)
+            if v and not self.utils.is_collision(v_nearest, v):
+                self.extend(v)
+                if v.parent:
+                    self.rewire_neighbours(v)
+                    self.reduce_inconsistency()
 
-                if neighbor_indices:
-                    self.find_parent(node_new, neighbor_indices)
-                    self.rewire(node_new, neighbor_indices)
-            # END REPLACE
-            
-            # Add call to rewire here
-            # Add call to reduce_inconsistency here
 
-    def extend(self, node_new):
-        neighbor_indices = self.neighbor_indices(node_new)
-        self.find_parent(node_new, neighbor_indices)
-        if self.parent == None:
-            return 
+    def extend(self, v):
+        # Algorithm 2
+        V_near = self.near(v)
+        self.find_parent(v, V_near)
+        if not v.parent:
+            return
+        self.add_node(v)
         # child has already been added to parent's children
-        for u in neighbor_indices:
-            if not self.utils.is_collision(node_new, u):
-                node_new.og_neighbor.add(u)
-                u.in_neighbor.add(node_new)
-            if not self.utils.is_collision(u, node_new):
-                u.out_neighbor.add(node_new)
-                node_new.og_neighbor.add(u)
+        for u in V_near:
+            # no need to check for collisions, already checked in near()
+            # also, collisions are symmetric
+            v.N_o_plus.add(u)
+            v.N_o_minus.add(u)
+            u.N_r_plus.add(v)
+            u.N_r_minus.add(v)
                 
     def update_obstacles(self, event):
+        # Algorithm 8
         x, y = int(event.xdata), int(event.ydata)
         self.add_new_obstacle([x, y, 2])
         self.propagate_descendants()
         self.verify_queue(self.s_bot)
-
-        # reduce inconsistency
+        self.reduce_inconsistency()
 
     def add_new_obstacle(self, obs):
+        # Algorithm 12
+        x, y, r = obs
         print("Add circle obstacle at: s =", x, ",", "y =", y)
         self.obs_circle.append(obs)
         self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
@@ -260,7 +227,8 @@ class RRTX:
 
         # get all edges that intersect the new circle obstacle
         # DOES EDGE SET "E" INCLUDE EDGES THAT HAVE BEEN REMOVED PREVIOUSLY??? NOT ACCOUNTING RIGHT NOW
-        E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and utils.is_intersect_circle(*utils.get_ray(v, u), obs[:2], obs[2])]
+        
+        E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
         for v, u in E_O:
             v.infinite_dist_nodes.add(u)
             u.infinite_dist_nodes.add(v)
@@ -271,12 +239,14 @@ class RRTX:
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
     def verify_orphan(self, v):
+        # Algorithm 10
         # if v is in Q, remove it from Q and add it to orphan_nodes
         if v in self.Q:
             self.Q.remove(v)
             self.orphan_nodes.add(v)
 
     def propagate_descendants(self):
+        # Algorithm 9
         # recursively add children of nodes in orphan_nodes to orphan_nodes
         orphan_index = 0
         while orphan_index < len(self.orphan_nodes):
@@ -300,6 +270,7 @@ class RRTX:
             v.parent = None
 
     def verify_queue(self, v):
+        # Algorithm 13
         # this does not do the updating, it is done after all changes are made (in propagate_descendants)
         # if v is in Q, update its cost and position, otherwise just add it
         try:
@@ -309,55 +280,66 @@ class RRTX:
         heapq.heappush(self.Q, (v.get_key(), v))
 
     def reduce_inconsistency(self):
-
-        while len(self.Q) > 0 and (heapq.nsmallest(1, self.Q)[0] < self.s_bot.get_key() \
+        # Algorithm 5
+        if self.Q:
+            smallest = self.Q[0][0]
+            key = self.s_bot.get_key()
+        while len(self.Q) > 0 and (self.Q[0][0] < self.s_bot.get_key() \
                 or self.s_bot.lmc != self.s_bot.cost_to_goal or np.isinf(self.s_bot.cost_to_goal) \
-                or self.s_bot in self.Q):
+                or self.s_bot in list(zip(*self.Q))[1]):
             v = heapq.heappop(self.Q)[1]
         
-        if v.cost_to_goal - v.lmc > self.epsilon:
-            v.update_LMC()
-
-            # TO BE CONTINUED
+            if v.cost_to_goal - v.lmc > self.epsilon:
+                v.update_LMC()
+                self.rewire_neighbours(v)
+            
+            v.cost_to_goal = v.lmc
 
     def add_node(self, node_new):
         self.tree_nodes.append(node_new)
-        self.vertices_coor.append([node_new.x, node_new.y])
+        # self.vertices_coor.append([node_new.x, node_new.y])
+        self.kd_tree.add(node_new)
 
-    def saturate(self, node_start, node_goal):
-        dist, theta = self.get_distance_and_angle(node_start, node_goal)
+    def saturate(self, v_nearest, v):
+        dist, theta = self.get_distance_and_angle(v_nearest, v)
         dist = min(self.step_len, dist)
-        node_new = Node((node_start.x + dist * math.cos(theta),
-                         node_start.y + dist * math.sin(theta)))
+        node_new = Node((v_nearest.x + dist * math.cos(theta),
+                         v_nearest.y + dist * math.sin(theta)))
         return node_new
 
-    def find_parent(self, node_new, neighbor_indices):
-        costs = [self.get_new_cost(self.tree_nodes[i], node_new) for i in neighbor_indices]
-        min_cost_index = int(np.argmin(costs))
-        min_cost_neighbor_index = neighbor_indices[min_cost_index]
-        if costs[min_cost_index] < node_new.cost_to_goal:
-            node_new.set_parent(new_parent=self.tree_nodes[min_cost_neighbor_index])
+    def find_parent(self, v, U):
+        # Algorithm 6
+        # skip collision check because it is done in "near()"
+        costs = [math.sqrt((v.x - u.x)**2 + (v.y - u.y)**2) + u.lmc for u in U]
+        if not costs:
+            return
+        min_idx = int(np.argmin(costs))
+        best_u = U[min_idx]
+        v.set_parent(best_u)
+        v.lmc = costs[min_idx] + best_u.lmc
 
-    def rewire(self, node_new, neighbor_indices):
-        for i in neighbor_indices:
-            node_neighbor = self.tree_nodes[i]
-
-            new_cost = self.get_new_cost(node_new, node_neighbor)
-            if new_cost < node_neighbor.cost_to_goal:
-                node_neighbor.set_parent(new_parent=node_new)
+    def rewire_neighbours(self, v):
+        # Algorithm 4
+        if v.cost_to_goal - v.lmc > self.epsilon:
+            for u in v.all_in_neighbors() - v.parent:
+                if u.lmc > v.distance(u) + v.lmc:
+                    u.lmc = v.distance(u) + v.lmc
+                    u.set_parent(v) # is it this or the other way around?
+                    if u.cost_to_goal - u.lmc > epsilon:
+                        self.verify_queue(u)
 
     def get_new_cost(self, node_start, node_end):
         dist = self.get_distance(node_start, node_end)
         return node_start.cost_to_goal + dist
 
-    def random_node(self, goal_sample_rate):
+    def random_node(self, reached_goal=False):
         delta = self.utils.delta
 
-        if np.random.random() > goal_sample_rate:
-            return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
-                         np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
+        if not reached_goal and np.random.random() < self.start_sample_rate:
+            return Node((self.s_start.x, self.s_start.y))
 
-        return self.s_goal
+        return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
+                     np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
 
     def update_gamma(self):
         '''
@@ -371,28 +353,34 @@ class RRTX:
         for (_, _, w, h) in self.obs_rectangle:
             mu_X_free -= w * h
 
-        self.gamma = self.gamma_FOS * 2 * (1 + 1/self.d)**(1/self.d) * (mu_X_free/self.zeta_d)**(1/self.d) # optimality condition from Theorem 38 of RRT* paper
+        self.gamma = self.gamma_FOS * (2 * (1 + 1/self.d))**(1/self.d) * (mu_X_free/self.zeta_d)**(1/self.d) # optimality condition from Theorem 38 of RRT* paper
 
     def shrinking_ball_radius(self):
         '''
         Computes and returns the radius for the shrinking ball
         '''
-        return min(self.step_len, self.gamma * (np.log(len(self.tree_nodes)) / len(self.tree_nodes))**(1/self.d))
+        return min(self.step_len, self.gamma * np.log(len(self.tree_nodes)+1) / len(self.tree_nodes))
 
-    def neighbor_indices(self, node):
-        
-        nodes_coor = np.array(self.vertices_coor)
-        node_coor = np.array([node.x, node.y]).reshape((1,2))
-        dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
-        dist_table_index = [ind for ind in range(len(dist_table)) if dist_table[ind] <= self.search_radius and 
-                            self.tree_nodes[ind] != node.parent and not self.utils.is_collision(node, self.tree_nodes[ind])]
-        return dist_table_index
+    def near(self, v):
+        # should this include nodes not in the tree???
+        # this is probably broken now because of the indexing
+        # maybe use a kd-tree instead?
+        # V_coor = np.array(self.vertices_coor)
+        # v_coor = np.array([v.x, v.y]).reshape((1,2))
+        # dist_table = np.linalg.norm(V_coor - v_coor, axis=1)
+        # V_near = [node for idx, node in enumerate(self.tree_nodes) if 
+        #             dist_table[idx] <= self.search_radius and v != node]
+        # return V_near
+        return self.kd_tree.search_nn_dist((v.x, v.y), self.search_radius)
 
-    def nearest(self, node):
-        nodes_coor = np.array(self.vertices_coor)
-        node_coor = np.array([node.x, node.y])
-        dist_table = np.linalg.norm(nodes_coor - node_coor, axis=1)
-        return self.tree_nodes[int(np.argmin(dist_table))]
+    def nearest(self, v):
+        # should this include nodes not in the tree???
+        # this is probably broken now because of the indexing
+        # V_coor = np.array(self.vertices_coor)
+        # v_coor = np.array([v.x, v.y])
+        # dist_table = np.linalg.norm(V_coor - v_coor, axis=1)
+        # return self.tree_nodes[int(np.argmin(dist_table))]
+        return self.kd_tree.search_nn((v.x, v.y))[0].data
 
     def extract_path(self, node_end):
         path = [[self.s_goal.x, self.s_goal.y]]
@@ -427,7 +415,14 @@ def main():
     x_start = (18, 8)  # Starting node
     x_goal = (37, 18)  # Goal node
 
-    rrtx = RRTX(x_start, x_goal, 5.0, 0.10, 20, 10000)
+
+    rrtx = RRTX(
+        x_start=x_start, 
+        x_goal=x_goal, 
+        step_len=5.0, 
+        epsilon=0.05,
+        start_sample_rate=0.10,  
+        iter_max=10000)
     rrtx.planning()
 
 
