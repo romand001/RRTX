@@ -14,7 +14,7 @@ import env, plotting, utils, queue
 
 class Node(Sequence):
     # inherits from Sequence to support indexing and thus kd-tree support
-    def __init__(self, n, cost_to_goal=np.inf):
+    def __init__(self, n, lmc=np.inf, cost_to_goal=np.inf):
         self.n = n # make iterable for kd-tree insertion
         self.x = n[0]
         self.y = n[1]
@@ -22,14 +22,8 @@ class Node(Sequence):
         self.children = set([])
         self.cost_to_parent = np.inf
         self.cost_to_goal = cost_to_goal
-        self.lmc = np.inf
+        self.lmc = lmc
         self.infinite_dist_nodes = set([]) # set of nodes u where d_pi(v,u) has been set to infinity after adding an obstacle
-        # each node has original neighbors, running (new) in/out neighbors, 
-        # AND parent, and in-child set. moving through parent/child should always yield shortest path
-        # I CHANGED THIS BECAUSE THERE EXIST BOTH INGOING AND OUTGOING OG NEIGHBORS
-        # self.og_neighbor = set([])
-        # self.out_neighbor = set([])
-        # self.in_neighbor = set([])
         self.N_o_plus = set([]) # outgoing original neighbours
         self.N_o_minus = set([]) # incoming original neighbours
         self.N_r_plus = set([]) # outgoing running in neighbours
@@ -51,7 +45,6 @@ class Node(Sequence):
         # this is required for kd-tree insertion
         return 2
 
-
     def all_out_neighbors(self):
         return self.N_o_plus.union(self.N_r_plus)
     
@@ -63,8 +56,8 @@ class Node(Sequence):
         if old_parent := self.parent:
             old_parent.children.remove(self)
         self.parent = new_parent
-        self.cost_to_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
-        self.cost_to_goal = new_parent.cost_to_goal + self.cost_to_parent
+        # self.cost_to_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
+        # self.cost_to_goal = new_parent.cost_to_goal + self.cost_to_parent
         new_parent.children.add(self)
         # if old_parent:
         #     self.update_cost_recursive()
@@ -79,7 +72,7 @@ class Node(Sequence):
 
     def cull_neighbors(self, r):
         # Algorithm 3
-        for u in self.out_neighbor:
+        for u in self.N_r_plus:
             # switched order of conditions in if statement to be faster
             if self.parent != u and r < self.distance(u):
                 self.N_r_plus.remove(u)
@@ -93,7 +86,9 @@ class Node(Sequence):
         lmcs = [(u, self.distance(u) + u.lmc) for u in (self.all_out_neighbors() - orphan_nodes) if u.parent != self]
         if not lmcs:
             return
-        p_prime, self.lmc = min(lmcs, key=lambda x: x[1]) # pretty sure they forgot to set the LMC in Algorithm 14, but they should have
+        # p_prime, self.lmc = min(lmcs, key=lambda x: x[1]) # pretty sure they forgot to set the LMC in Algorithm 14, but they should have
+        p_prime, _ = min(lmcs, key=lambda x: x[1]) # pretty sure they forgot to set the LMC in Algorithm 14, but they should have
+        # ^ replace _ with self.lmc to update the lmc as well
         self.set_parent(p_prime) # not sure if we need this or literally just set the parent manually without propagating
 
     def distance(self, other):
@@ -104,7 +99,7 @@ class RRTX:
     def __init__(self, x_start, x_goal, step_len, epsilon, 
                  start_sample_rate, iter_max):
         self.s_start = Node(x_start)
-        self.s_goal = Node(x_goal, cost_to_goal=0.0)
+        self.s_goal = Node(x_goal, lmc=0.0, cost_to_goal=0.0)
         self.s_bot = self.s_start
         self.step_len = step_len
         self.epsilon = epsilon
@@ -141,7 +136,7 @@ class RRTX:
         # for gamma computation
         self.d = 2 # dimension of the state space
         self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
-        self.gamma_FOS = 2.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
+        self.gamma_FOS = 5.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
         self.update_gamma() # initialize gamma
 
     def planning(self):
@@ -163,6 +158,7 @@ class RRTX:
         for i in range(self.iter_max):
 
             self.search_radius = self.shrinking_ball_radius()
+            print(f'search radius: {self.search_radius}')
 
             # animate
             if i % 10 == 0:
@@ -190,7 +186,6 @@ class RRTX:
                 if v.parent:
                     self.rewire_neighbours(v)
                     self.reduce_inconsistency()
-
 
     def extend(self, v):
         # Algorithm 2
@@ -274,23 +269,20 @@ class RRTX:
         # this does not do the updating, it is done after all changes are made (in propagate_descendants)
         # if v is in Q, update its cost and position, otherwise just add it
         try:
-            self.Q.remove(v)
+            self.Q.remove((v.get_key(), v))
         except ValueError:
             pass
         heapq.heappush(self.Q, (v.get_key(), v))
 
     def reduce_inconsistency(self):
         # Algorithm 5
-        if self.Q:
-            smallest = self.Q[0][0]
-            key = self.s_bot.get_key()
         while len(self.Q) > 0 and (self.Q[0][0] < self.s_bot.get_key() \
                 or self.s_bot.lmc != self.s_bot.cost_to_goal or np.isinf(self.s_bot.cost_to_goal) \
                 or self.s_bot in list(zip(*self.Q))[1]):
             v = heapq.heappop(self.Q)[1]
         
             if v.cost_to_goal - v.lmc > self.epsilon:
-                v.update_LMC()
+                v.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon)
                 self.rewire_neighbours(v)
             
             v.cost_to_goal = v.lmc
@@ -321,11 +313,11 @@ class RRTX:
     def rewire_neighbours(self, v):
         # Algorithm 4
         if v.cost_to_goal - v.lmc > self.epsilon:
-            for u in v.all_in_neighbors() - v.parent:
+            for u in v.all_in_neighbors() - set([v.parent]):
                 if u.lmc > v.distance(u) + v.lmc:
                     u.lmc = v.distance(u) + v.lmc
                     u.set_parent(v) # is it this or the other way around?
-                    if u.cost_to_goal - u.lmc > epsilon:
+                    if u.cost_to_goal - u.lmc > self.epsilon:
                         self.verify_queue(u)
 
     def get_new_cost(self, node_start, node_end):
