@@ -62,11 +62,17 @@ class Node(Sequence):
 
     def cull_neighbors(self, r):
         # Algorithm 3
-        for u in self.N_r_plus:
+        N_r_plus_list = list(self.N_r_plus) # can't remove from set while iterating over it
+        for u in N_r_plus_list:
             # switched order of conditions in if statement to be faster
             if self.parent != u and r < self.distance(u):
-                self.N_r_plus.remove(u)
-                u.N_r_minus.remove(self)
+                N_r_plus_list.remove(u)
+                try:
+                    u.N_r_minus.remove(self)
+                except KeyError:
+                    print('KeyError in RRTX.cull_neighbors(), skipping remove')
+
+        self.N_r_plus = set(N_r_plus_list)
 
     def update_LMC(self, orphan_nodes, r, epsilon):
         # Algorithm 14
@@ -184,14 +190,14 @@ class RRTX:
         if not v.parent:
             return
         self.add_node(v)
-        # child has already been added to parent's children
+        # child has already been added to parent's children in call to set_parent()
         for u in V_near:
-            # no need to check for collisions, already checked in near()
-            # also, collisions are symmetric
-            v.N_o_plus.add(u)
-            v.N_o_minus.add(u)
-            u.N_r_plus.add(v)
-            u.N_r_minus.add(v)
+            # collisions are symmetric for us
+            if not self.utils.is_collision(u, v):
+                v.N_o_plus.add(u)
+                v.N_o_minus.add(u)
+                u.N_r_plus.add(v)
+                u.N_r_minus.add(v)
                 
     def update_obstacles(self, event):
         # Algorithm 8
@@ -279,7 +285,6 @@ class RRTX:
 
     def add_node(self, node_new):
         self.tree_nodes.append(node_new)
-        # self.vertices_coor.append([node_new.x, node_new.y])
         self.kd_tree.add(node_new)
 
     def saturate(self, v_nearest, v):
@@ -303,6 +308,7 @@ class RRTX:
     def rewire_neighbours(self, v):
         # Algorithm 4
         if v.cost_to_goal - v.lmc > self.epsilon:
+            v.cull_neighbors(self.search_radius)
             for u in v.all_in_neighbors() - set([v.parent]):
                 if u.lmc > v.distance(u) + v.lmc:
                     u.lmc = v.distance(u) + v.lmc
@@ -344,24 +350,9 @@ class RRTX:
         return min(self.step_len, self.gamma * np.log(len(self.tree_nodes)+1) / len(self.tree_nodes))
 
     def near(self, v):
-        # should this include nodes not in the tree???
-        # this is probably broken now because of the indexing
-        # maybe use a kd-tree instead?
-        # V_coor = np.array(self.vertices_coor)
-        # v_coor = np.array([v.x, v.y]).reshape((1,2))
-        # dist_table = np.linalg.norm(V_coor - v_coor, axis=1)
-        # V_near = [node for idx, node in enumerate(self.tree_nodes) if 
-        #             dist_table[idx] <= self.search_radius and v != node]
-        # return V_near
         return self.kd_tree.search_nn_dist((v.x, v.y), self.search_radius)
 
     def nearest(self, v):
-        # should this include nodes not in the tree???
-        # this is probably broken now because of the indexing
-        # V_coor = np.array(self.vertices_coor)
-        # v_coor = np.array([v.x, v.y])
-        # dist_table = np.linalg.norm(V_coor - v_coor, axis=1)
-        # return self.tree_nodes[int(np.argmin(dist_table))]
         return self.kd_tree.search_nn((v.x, v.y))[0].data
 
     def extract_path(self, node_end):
