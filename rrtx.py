@@ -30,7 +30,8 @@ class Node(Sequence):
 
     def __eq__(self, other):
         # this is required for the checking if a node is "in" self.Q, but idk what the condition should be
-        return (self.x - other.x)**2 + (self.y - other.y)**2 < 1e-6
+        # return (self.x - other.x)**2 + (self.y - other.y)**2 < 1e-6
+        return self.get_key() == other.get_key()
 
     def __hash__(self):
         # this is required for storing Nodes to sets
@@ -70,7 +71,8 @@ class Node(Sequence):
                 try:
                     u.N_r_minus.remove(self)
                 except KeyError:
-                    print('KeyError in RRTX.cull_neighbors(), skipping remove')
+                    # print('KeyError in RRTX.cull_neighbors(), skipping remove')
+                    pass
 
         self.N_r_plus = set(N_r_plus_list)
 
@@ -92,7 +94,7 @@ class Node(Sequence):
 
 
 class RRTX:
-    def __init__(self, x_start, x_goal, step_len, epsilon, 
+    def __init__(self, x_start, x_goal, step_len, gamma_FOS, epsilon, 
                  start_sample_rate, iter_max):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal, lmc=0.0, cost_to_goal=0.0)
@@ -132,7 +134,7 @@ class RRTX:
         # for gamma computation
         self.d = 2 # dimension of the state space
         self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
-        self.gamma_FOS = 5.0 # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
+        self.gamma_FOS = gamma_FOS # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
         self.update_gamma() # initialize gamma
 
     def planning(self):
@@ -154,7 +156,7 @@ class RRTX:
         for i in range(self.iter_max):
 
             self.search_radius = self.shrinking_ball_radius()
-            print(f'search radius: {self.search_radius}')
+            # print(f'search radius: {self.search_radius}')
 
             # animate
             if i % 10 == 0:
@@ -178,14 +180,19 @@ class RRTX:
             v = self.saturate(v_nearest, v)
 
             if v and not self.utils.is_collision(v_nearest, v):
-                self.extend(v)
+                self.extend(v, v_nearest)
                 if v.parent:
                     self.rewire_neighbours(v)
                     self.reduce_inconsistency()
 
-    def extend(self, v):
+    def extend(self, v, v_nearest):
         # Algorithm 2
         V_near = self.near(v)
+
+        ### THIS WAS NOT IN PAPER, BUT IN JULIA CODE
+        if not V_near:
+            V_near.append(v_nearest)
+
         self.find_parent(v, V_near)
         if not v.parent:
             return
@@ -312,13 +319,9 @@ class RRTX:
             for u in v.all_in_neighbors() - set([v.parent]):
                 if u.lmc > v.distance(u) + v.lmc:
                     u.lmc = v.distance(u) + v.lmc
-                    u.set_parent(v) # is it this or the other way around?
+                    u.set_parent(v)
                     if u.cost_to_goal - u.lmc > self.epsilon:
                         self.verify_queue(u)
-
-    def get_new_cost(self, node_start, node_end):
-        dist = self.get_distance(node_start, node_end)
-        return node_start.cost_to_goal + dist
 
     def random_node(self, reached_goal=False):
         delta = self.utils.delta
@@ -366,12 +369,6 @@ class RRTX:
 
         return path
     
-    def cull_neighbors(self, v):
-        for u in v.out_neighbors:
-            if (self.get_distance(v,u) > self.search_radius) and (v.parent != u):
-                v.out_neighbors.remove(u)
-                u.in_neighbors.remove(v)
-    
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
         dx = node_end.x - node_start.x
@@ -392,7 +389,8 @@ def main():
     rrtx = RRTX(
         x_start=x_start, 
         x_goal=x_goal, 
-        step_len=5.0, 
+        step_len=3.0, 
+        gamma_FOS = 100.0,
         epsilon=0.05,
         start_sample_rate=0.10,  
         iter_max=10000)
