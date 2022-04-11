@@ -2,7 +2,8 @@ import os
 import sys
 import math
 import heapq
-import functools
+# import functools
+# from queue import PriorityQueue
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
@@ -24,6 +25,10 @@ class Node:
         self.og_neighbor = set([])
         self.out_neighbor = set([])
         self.in_neighbor = set([])
+
+    def __eq__(self, other):
+        # this is required for the checking if a node is "in" self.Q, but idk what the condition should be
+        return (self.x - other.x)**2 + (self.y - other.y)**2 < 1e-6
 
     def all_out_neighbors(self):
         return self.out_neighbor.union(self.og_neighbor)
@@ -47,6 +52,9 @@ class Node:
         for child in self.children:
             child.update_cost_recursive()
 
+    def get_key(self):
+        return (min(self.cost_to_goal, self.lmc), self.cost_to_goal)
+
     def cull_neighbors(self, r):
         # Algorithm 3
         for u in self.out_neighbor:
@@ -69,34 +77,71 @@ class Node:
     def distance(self, other):
         return np.inf if other in self.infinite_dist_nodes else math.hypot(self.x - other.x, self.y - other.y)
 
-@functools.total_ordering
-def ComparableNode(Node):
-    '''  
-    This is a wrapper class for the Node class to provide a key comparison 
-    for the priority queue
-    '''
-    def __gt__(self, other):
-        '''  
-        Key for RRTX priority queue is ordered pair ( min(g(v), lmc(v)), g(v) )
-        (a, b) > (c, d) iff not a < c or (a == c and b < d)
-        '''
-        a = min(self.cost_to_goal, self.lmc)
-        c = min(other.cost_to_goal, other.lmc)
-        b = self.cost_to_goal
-        d = other.cost_to_goal
-        return not (a < c or (a == c and b < d))
+# @functools.total_ordering
+# class ComparableNode(Node):
+#     '''  
+#     This is a wrapper class for the Node class to provide a key comparison 
+#     for the priority queue
+#     '''
+#     def __gt__(self, other):
+#         '''  
+#         Key for RRTX priority queue is ordered pair ( min(g(v), lmc(v)), g(v) )
+#         (a, b) > (c, d) iff not a < c or (a == c and b < d)
+#         '''
+#         a = min(self.cost_to_goal, self.lmc)
+#         c = min(other.cost_to_goal, other.lmc)
+#         b = self.cost_to_goal
+#         d = other.cost_to_goal
+#         return not (a < c or (a == c and b < d))
     
-    def __eq__(self, other):
-        return min(self.cost_to_goal, self.lmc) == min(other.cost_to_goal, other.lmc)
+#     def __eq__(self, other):
+#         return min(self.cost_to_goal, self.lmc) == min(other.cost_to_goal, other.lmc)
 
+# class _Wrapper:
+#     def __init__(self, item, key):
+#         self.item = item
+#         self.key = key
+
+#     def __lt__(self, other):
+#         return self.key(self.item) < other.key(other.item)
+
+#     def __eq__(self, other):
+#         return self.key(self.item) == other.key(other.item)
+
+
+# class KeyPriorityQueue(PriorityQueue):
+#     def __init__(self, key):
+#         self.key = key
+#         super().__init__()
+
+#     def _get(self):
+#         wrapper = super()._get()
+#         return wrapper.item
+
+#     def _put(self, item):
+#         super()._put(_Wrapper(item, self.key))
+
+# def pq_comparator(node1: Node, node2: Node) -> int:
+#     a = min(node1.cost_to_goal, node1.lmc)
+#     c = min(node2.cost_to_goal, node2.lmc)
+#     b = node1.cost_to_goal
+#     d = node2.cost_to_goal
+#     if a < c or (a == c and b < d):
+#         return 1
+#     elif a > c or (a == c and b > d):
+#         return -1
+#     else:
+#         return 0
+    
 
 class RRTX:
-    def __init__(self, x_start, x_goal, step_len,
+    def __init__(self, x_start, x_goal, step_len, epsilon, 
                  goal_sample_rate, search_radius, iter_max):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal)
         self.s_bot = self.s_start
         self.step_len = step_len
+        self.epsilon = epsilon
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
         self.iter_max = iter_max
@@ -104,6 +149,7 @@ class RRTX:
         self.tree_nodes = [self.s_start] # this is V_T in the paper
         self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
         self.Q = [] # priority queue of ComparableNodes
+        # self.Q = KeyPriorityQueue(key=cmp_to_key(pq_comparator))
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
@@ -200,8 +246,10 @@ class RRTX:
     def update_obstacles(self, event):
         x, y = int(event.xdata), int(event.ydata)
         self.add_new_obstacle([x, y, 2])
-        
-        # Add rewiring/reduce inconsistency/propagate descendants here
+        self.propagate_descendants()
+        self.verify_queue(self.s_bot)
+
+        # reduce inconsistency
 
     def add_new_obstacle(self, obs):
         print("Add circle obstacle at: s =", x, ",", "y =", y)
@@ -223,29 +271,54 @@ class RRTX:
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
     def verify_orphan(self, v):
-        # is there a better way to do this? maybe something O(logN)?
-        for comparable_node in self.Q:
-            if comparable_node.node == v:
-                self.Q.remove(comparable_node)
-                self.orphan_nodes.add(v)
-                break
+        # if v is in Q, remove it from Q and add it to orphan_nodes
+        if v in self.Q:
+            self.Q.remove(v)
+            self.orphan_nodes.add(v)
 
     def propagate_descendants(self):
+        # recursively add children of nodes in orphan_nodes to orphan_nodes
         orphan_index = 0
         while orphan_index < len(self.orphan_nodes):
             self.orphan_nodes = self.orphan_nodes + self.orphan_nodes[orphan_index].children
             orphan_index += 1
         
-        orphan_index = 0
-        while orphan_index < len(self.orphan_nodes):
-            v = self.orphan_nodes[orphan_index]
+        # give all outgoing edges of nodes in orphan_nodes a cost of infinity and update their priority in Q
+        for v in self.orphan_nodes:
             for u in (v.all_out_neighbors() + set([v.parent])) - self.orphan_nodes:
                 u.cost_to_goal = np.inf # is this the right way to do it?
-                # VERIFY QUEUE HERE
-            orphan_index += 1
+                verify_queue(u)
+        heapq.heapify(self.Q) # reheapify after keys changed to re-sort queue
 
-        # TO BE CONTINUED
+        # idk what this is
+        for v in self.orphan_nodes:
+            self.orphan_nodes.remove(v)
+            v.cost_to_goal = np.inf
+            v.lmc = np.inf
+            if v.parent:
+                v.parent.children.remove(v)
+            v.parent = None
 
+    def verify_queue(self, v):
+        # this does not do the updating, it is done after all changes are made (in propagate_descendants)
+        # if v is in Q, update its cost and position, otherwise just add it
+        try:
+            self.Q.remove(v)
+        except ValueError:
+            pass
+        heapq.heappush(self.Q, (v.get_key(), v))
+
+    def reduce_inconsistency(self):
+
+        while len(self.Q) > 0 and (heapq.nsmallest(1, self.Q)[0] < self.s_bot.get_key() \
+                or self.s_bot.lmc != self.s_bot.cost_to_goal or np.isinf(self.s_bot.cost_to_goal) \
+                or self.s_bot in self.Q):
+            v = heapq.heappop(self.Q)[1]
+        
+        if v.cost_to_goal - v.lmc > self.epsilon:
+            v.update_LMC()
+
+            # TO BE CONTINUED
 
     def add_node(self, node_new):
         self.tree_nodes.append(node_new)
