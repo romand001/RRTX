@@ -53,8 +53,11 @@ class Node(Sequence):
    
     def set_parent(self, new_parent):
         # if a parent exists already
-        if old_parent := self.parent:
-            old_parent.children.remove(self)
+        if self.parent:
+            try:
+                self.parent.children.remove(self)
+            except:
+                print('KeyError in set parent')
         self.parent = new_parent
         new_parent.children.add(self)
 
