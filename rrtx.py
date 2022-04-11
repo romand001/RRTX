@@ -20,7 +20,6 @@ class Node(Sequence):
         self.y = n[1]
         self.parent = None
         self.children = set([])
-        self.cost_to_parent = np.inf
         self.cost_to_goal = cost_to_goal
         self.lmc = lmc
         self.infinite_dist_nodes = set([]) # set of nodes u where d_pi(v,u) has been set to infinity after adding an obstacle
@@ -56,16 +55,7 @@ class Node(Sequence):
         if old_parent := self.parent:
             old_parent.children.remove(self)
         self.parent = new_parent
-        # self.cost_to_parent = math.hypot(self.x - new_parent.x, self.y - new_parent.y)
-        # self.cost_to_goal = new_parent.cost_to_goal + self.cost_to_parent
         new_parent.children.add(self)
-        # if old_parent:
-        #     self.update_cost_recursive()
-
-    def update_cost_recursive(self):
-        self.cost_to_goal = self.parent.cost_to_goal + self.cost_to_parent
-        for child in self.children:
-            child.update_cost_recursive()
 
     def get_key(self):
         return (min(self.cost_to_goal, self.lmc), self.cost_to_goal)
@@ -179,7 +169,7 @@ class RRTX:
 
             v = self.random_node()
             v_nearest = self.nearest(v)
-            v = self.saturate(v_nearest, v) # this also sets cost_to_parent and cost_to_goal
+            v = self.saturate(v_nearest, v)
 
             if v and not self.utils.is_collision(v_nearest, v):
                 self.extend(v)
