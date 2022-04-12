@@ -156,12 +156,16 @@ class RRTX:
         plt.pause(0.1)
         self.ax.draw_artist(self.edge_col)
         self.fig.canvas.blit(self.ax.bbox)
-
+        start_time = time.time()
+        first_time = True
         for i in range(self.iter_max):
-
+            run_time = time.time() - start_time
             # update robot position if it's moving
-            if self.path_to_goal:
+            if self.path_to_goal and run_time > 5:
                 # timing stuff
+                if first_time:
+                    self.prev_time = time.time()
+                    first_time = False
                 if i != 0:
                     elapsed_time = time.time() - self.prev_time
                 self.prev_time = time.time()
@@ -179,17 +183,18 @@ class RRTX:
             # animate
             # if i % 10 == 0:
             # add like this for now
-            self.edges = []
-            for node in self.tree_nodes:
-                if node.parent:
-                    self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
-            self.edge_col.set_segments(np.array(self.edges))
-            self.fig.canvas.restore_region(self.bg)
-            self.plotting.plot_env(self.ax)
-            self.plotting.plot_robot(self.ax, self.robot_position)
-            self.ax.draw_artist(self.edge_col)
-            self.fig.canvas.blit(self.ax.bbox)
-            self.fig.canvas.flush_events()
+            if run_time > 3 or run_time < 0.01:
+                self.edges = []
+                for node in self.tree_nodes:
+                    if node.parent:
+                        self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
+                self.edge_col.set_segments(np.array(self.edges))
+                self.fig.canvas.restore_region(self.bg)
+                self.plotting.plot_env(self.ax)
+                self.plotting.plot_robot(self.ax, self.robot_position)
+                self.ax.draw_artist(self.edge_col)
+                self.fig.canvas.blit(self.ax.bbox)
+                self.fig.canvas.flush_events()
 
             self.search_radius = self.shrinking_ball_radius()
 
@@ -318,7 +323,7 @@ class RRTX:
         if math.hypot((node_new.x - self.s_start.x), (node_new.y - self.s_start.y)) < 1e-6:
             self.s_bot = node_new
             self.path_to_goal = True
-            self.prev_time = time.time()
+            # self.prev_time = time.time()
 
     def saturate(self, v_nearest, v):
         dist, theta = self.get_distance_and_angle(v_nearest, v)
