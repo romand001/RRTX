@@ -1,11 +1,10 @@
 import os
 import sys
+import time
 import math
 import heapq
 from collections.abc import Sequence
 import kdtree
-# import functools
-# from queue import PriorityQueue
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
@@ -105,14 +104,17 @@ class RRTX:
         self.step_len = step_len
         self.epsilon = epsilon
         self.start_sample_rate = start_sample_rate
-        self.search_radius = 0
+        self.search_radius = 0.0
         self.iter_max = iter_max
         # self.vertices_coor = [[self.s_goal.x, self.s_goal.y]] # for faster nearest neighbor lookup
         self.kd_tree = kdtree.create([self.s_goal])
+        sys.setrecursionlimit(3000) # for the kd-tree cus it searches recursively
         self.tree_nodes = [self.s_goal] # this is V_T in the paper
         self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
         self.Q = [] # priority queue of ComparableNodes
-        # self.Q = KeyPriorityQueue(key=cmp_to_key(pq_comparator))
+        self.path_to_goal = False
+        self.robot_position = [self.s_bot.x, self.s_bot.y]
+        self.robot_speed = 2.0 # m/s
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
@@ -133,7 +135,6 @@ class RRTX:
         self.obs_rectangle = self.env.obs_rectangle
         self.obs_boundary = self.env.obs_boundary
 
-        ''' RRTX Stuff '''
         # for gamma computation
         self.d = 2 # dimension of the state space
         self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
@@ -158,25 +159,39 @@ class RRTX:
 
         for i in range(self.iter_max):
 
-            self.search_radius = self.shrinking_ball_radius()
-            # print(f'search radius: {self.search_radius}')
+            # update robot position if it's moving
+            if self.path_to_goal:
+                # timing stuff
+                if i != 0:
+                    elapsed_time = time.time() - self.prev_time
+                self.prev_time = time.time()
+
+                # update robot position
+                self.robot_position = self.utils.update_robot_position(
+                    self.robot_position, [self.s_bot.parent.x, self.s_bot.parent.y], 
+                    self.robot_speed, elapsed_time)
+                
+                # update node that robot is "at"
+                if math.hypot(self.robot_position[0] - self.s_bot.parent.x,
+                              self.robot_position[1] - self.s_bot.parent.y) < 0.05:
+                    self.s_bot = self.s_bot.parent
 
             # animate
-            if i % 10 == 0:
-                # add like this for now
-                self.edges = []
-                for node in self.tree_nodes:
-                    if node.parent:
-                        self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
-                self.edge_col.set_segments(np.array(self.edges))
-                self.fig.canvas.restore_region(self.bg)
-                self.plotting.plot_env(self.ax)
-                self.ax.draw_artist(self.edge_col)
-                self.fig.canvas.blit(self.ax.bbox)
-                self.fig.canvas.flush_events()
+            # if i % 10 == 0:
+            # add like this for now
+            self.edges = []
+            for node in self.tree_nodes:
+                if node.parent:
+                    self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
+            self.edge_col.set_segments(np.array(self.edges))
+            self.fig.canvas.restore_region(self.bg)
+            self.plotting.plot_env(self.ax)
+            self.plotting.plot_robot(self.ax, self.robot_position)
+            self.ax.draw_artist(self.edge_col)
+            self.fig.canvas.blit(self.ax.bbox)
+            self.fig.canvas.flush_events()
 
-            # update robot position if it's moving
-            # UNIMPLEMENTED
+            self.search_radius = self.shrinking_ball_radius()
 
             v = self.random_node()
             v_nearest = self.nearest(v)
@@ -253,6 +268,10 @@ class RRTX:
         while orphan_index < len(self.orphan_nodes):
             self.orphan_nodes = self.orphan_nodes + self.orphan_nodes[orphan_index].children
             orphan_index += 1
+
+        # check if robot node got orphaned
+        if self.s_bot in self.orphan_nodes:
+            self.path_to_goal = False
         
         # give all outgoing edges of nodes in orphan_nodes a cost of infinity and update their priority in Q
         for v in self.orphan_nodes:
@@ -296,6 +315,10 @@ class RRTX:
     def add_node(self, node_new):
         self.tree_nodes.append(node_new)
         self.kd_tree.add(node_new)
+        if math.hypot((node_new.x - self.s_start.x), (node_new.y - self.s_start.y)) < 1e-6:
+            self.s_bot = node_new
+            self.path_to_goal = True
+            self.prev_time = time.time()
 
     def saturate(self, v_nearest, v):
         dist, theta = self.get_distance_and_angle(v_nearest, v)
@@ -326,10 +349,10 @@ class RRTX:
                     if u.cost_to_goal - u.lmc > self.epsilon:
                         self.verify_queue(u)
 
-    def random_node(self, reached_goal=False):
+    def random_node(self):
         delta = self.utils.delta
 
-        if not reached_goal and np.random.random() < self.start_sample_rate:
+        if not self.path_to_goal and np.random.random() < self.start_sample_rate:
             return Node((self.s_start.x, self.s_start.y))
 
         return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),

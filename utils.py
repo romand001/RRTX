@@ -125,6 +125,12 @@ class Utils:
         return False
 
     @staticmethod
+    def update_robot_position(pos, dest, speed, dt):
+        dist = speed * dt
+        angle = math.atan2(dest[1] - pos[1], dest[0] - pos[0])
+        return [pos[0] + dist * math.cos(angle), pos[1] + dist * math.sin(angle)]
+
+    @staticmethod
     def get_ray(start, end):
         orig = [start.x, start.y]
         direc = [end.x - start.x, end.y - start.y]
@@ -133,3 +139,9 @@ class Utils:
     @staticmethod
     def get_dist(start, end):
         return math.hypot(end.x - start.x, end.y - start.y)
+
+    @staticmethod
+    def get_dist_and_angle(node_start, node_end):
+        dx = node_end.x - node_start.x
+        dy = node_end.y - node_start.y
+        return math.hypot(dx, dy), math.atan2(dy, dx)

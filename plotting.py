@@ -73,22 +73,15 @@ class Plotting:
         plt.axis("equal")
 
     def plot_env(self, ax):
-        # start and goal
-        start_patch = patches.Circle(
-            (self.xI[0], self.xI[1]), 0.5,
-            edgecolor='green',
-            facecolor='green',
-            fill=True
-        )
+        # goal
         goal_patch = patches.Circle(
             (self.xG[0], self.xG[1]), 0.5,
             edgecolor='red',
             facecolor='red',
             fill=True
         )
-        ax.add_patch(start_patch)
+        
         ax.add_patch(goal_patch)
-        ax.draw_artist(start_patch)
         ax.draw_artist(goal_patch)
 
         # boundary obstacles
@@ -123,6 +116,16 @@ class Plotting:
             )
             ax.add_patch(circle_patch)
             ax.draw_artist(circle_patch)
+
+    def plot_robot(self, ax, robot_position):
+        start_patch = patches.Circle(
+            (robot_position[0], robot_position[1]), 0.5,
+            edgecolor='green',
+            facecolor='green',
+            fill=True
+        )
+        ax.add_patch(start_patch)
+        ax.draw_artist(start_patch)
 
     def update_obs(self, obs_cir, obs_bound, obs_rec):
         self.obs_bound = obs_bound
