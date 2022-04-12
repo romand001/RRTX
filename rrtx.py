@@ -269,15 +269,18 @@ class RRTX:
         self.update_gamma() # free space volume changed, so gamma must change too
 
         # get all edges that intersect the new circle obstacle
-        # DOES EDGE SET "E" INCLUDE EDGES THAT HAVE BEEN REMOVED PREVIOUSLY??? NOT ACCOUNTING RIGHT NOW
-        E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
+        # E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
+        E_O = [(v, u) for v in self.tree_nodes for u in v.all_out_neighbors() 
+               if self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
         for v, u in E_O:
             v.infinite_dist_nodes.add(u)
             u.infinite_dist_nodes.add(v)
-            if v.parent == u: # this check is currently irrelevant since u is always v's parent
+            if v.parent and v.parent == u:
                 self.verify_orphan(v)
                 # should theoretically check if the robot is on this edge now, but we do not
-
+                # v.parent.children.remove(v) # these two lines are from the Julia code
+                # v.parent = None 
+                
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
     def verify_orphan(self, v):
@@ -390,7 +393,7 @@ class RRTX:
         if v.cost_to_goal - v.lmc > self.epsilon:
             v.cull_neighbors(self.search_radius)
             for u in v.all_in_neighbors() - set([v.parent]):
-                if u.lmc > v.distance(u) + v.lmc:
+                if u.lmc > v.distance(u) + v.lmc and not self.utils.is_collision(u, v): # added collision check (Julia)
                     u.lmc = v.distance(u) + v.lmc
                     u.set_parent(v)
                     if u.cost_to_goal - u.lmc > self.epsilon:
