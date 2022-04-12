@@ -35,6 +35,10 @@ class Node(Sequence):
         # return self.get_key() == other.get_key()
         # return self.x == other.x and self.y == other.y
 
+    def __lt__(self, other):
+        # this is just in case their keys are the same, so a ValueError is not thrown
+        return 1
+
     def __hash__(self):
         # this is required for storing Nodes to sets
         return hash(self.n)
@@ -163,6 +167,7 @@ class RRTX:
         self.ax.draw_artist(self.edge_col)
         self.fig.canvas.blit(self.ax.bbox)
         start_time = time.time()
+        prev_plotting = time.time()
         first_time = True
 
         for i in range(self.iter_max):
@@ -190,23 +195,25 @@ class RRTX:
             # animate
             if run_time > 5 or run_time < 0.01:
 
-                # # only update the plot every 10 iterations
-                # if i % 10 == 0:
-                self.edges = []
-                for node in self.tree_nodes:
-                    if node.parent:
-                        self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
-                self.edge_col.set_segments(np.array(self.edges))
-                self.fig.canvas.restore_region(self.bg)
-                self.ax.draw_artist(self.edge_col)
+                # only update the plot at 5 Hz
+                elapsed_plotting = time.time() - prev_plotting
+                if elapsed_plotting >= 0.2:
+                    prev_plotting = time.time()
+                    self.edges = []
+                    for node in self.tree_nodes:
+                        if node.parent:
+                            self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
+                    self.edge_col.set_segments(np.array(self.edges))
+                    self.fig.canvas.restore_region(self.bg)
+                    self.ax.draw_artist(self.edge_col)
 
-                self.path_col.set_segments(np.array(self.path))
-                self.ax.draw_artist(self.path_col)
+                    self.path_col.set_segments(np.array(self.path))
+                    self.ax.draw_artist(self.path_col)
 
-                self.plotting.plot_env(self.ax)
-                self.plotting.plot_robot(self.ax, self.robot_position)
-                self.fig.canvas.blit(self.ax.bbox)
-                self.fig.canvas.flush_events()
+                    self.plotting.plot_env(self.ax)
+                    self.plotting.plot_robot(self.ax, self.robot_position)
+                    self.fig.canvas.blit(self.ax.bbox)
+                    self.fig.canvas.flush_events()
 
             self.search_radius = self.shrinking_ball_radius()
 
@@ -219,6 +226,9 @@ class RRTX:
                 if v.parent:
                     self.rewire_neighbours(v)
                     self.reduce_inconsistency()
+
+            if self.s_bot.cost_to_goal < np.inf:
+                self.path_to_goal = True
 
     def extend(self, v, v_nearest):
         # Algorithm 2
@@ -312,8 +322,12 @@ class RRTX:
                 v.parent.infinite_dist_nodes.add(v)
                 v.parent.children.remove(v)
                 v.parent = None
-            self.tree_nodes.remove(v) # NOT IN THE PSEUDOCODE
-            self.kd_tree.remove(v)
+
+            try:
+                self.tree_nodes.remove(v) # NOT IN THE PSEUDOCODE
+                self.kd_tree.remove(v)
+            except ValueError:
+                pass
 
         self.orphan_nodes = set([]) # reset orphan_nodes to empty set
 
@@ -333,7 +347,10 @@ class RRTX:
                 or self.s_bot.lmc != self.s_bot.cost_to_goal or np.isinf(self.s_bot.cost_to_goal) \
                 or self.s_bot in list(zip(*self.Q))[1]):
 
-            v = heapq.heappop(self.Q)[1]
+            try:
+                v = heapq.heappop(self.Q)[1]
+            except TypeError:
+                print('something went wrong with the queue')
         
             if v.cost_to_goal - v.lmc > self.epsilon:
                 v.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon)
