@@ -3,6 +3,7 @@ import sys
 import time
 import math
 import heapq
+from collections import deque
 from collections.abc import Sequence
 import kdtree
 import numpy as np
@@ -29,8 +30,10 @@ class Node(Sequence):
 
     def __eq__(self, other):
         # this is required for the checking if a node is "in" self.Q, but idk what the condition should be
-        # return (self.x - other.x)**2 + (self.y - other.y)**2 < 1e-6
-        return self.get_key() == other.get_key()
+        return id(self) == id(other) or self.get_key() == other.get_key() or \
+            math.hypot(self.x - other.x, self.y - other.y) < 1e-6
+        # return self.get_key() == other.get_key()
+        # return self.x == other.x and self.y == other.y
 
     def __hash__(self):
         # this is required for storing Nodes to sets
@@ -83,13 +86,13 @@ class Node(Sequence):
         # pass in orphan nodes from main code, make sure the set is maintained properly
         self.cull_neighbors(r)
         # list of tuples: ( u, d_pi(v,u)+lmc(u) )
-        lmcs = [(u, self.distance(u) + u.lmc) for u in (self.all_out_neighbors() - orphan_nodes) if u.parent != self]
+        lmcs = [(u, self.distance(u) + u.lmc) for u in (self.all_out_neighbors() - orphan_nodes) if u.parent and u.parent != self]
         if not lmcs:
             return
-        # p_prime, self.lmc = min(lmcs, key=lambda x: x[1]) # pretty sure they forgot to set the LMC in Algorithm 14, but they should have
-        p_prime, _ = min(lmcs, key=lambda x: x[1]) # pretty sure they forgot to set the LMC in Algorithm 14, but they should have
-        # ^ replace _ with self.lmc to update the lmc as well
-        self.set_parent(p_prime) # not sure if we need this or literally just set the parent manually without propagating
+        p_prime, lmc_prime = min(lmcs, key=lambda x: x[1])
+        if lmc_prime < self.lmc:
+            self.lmc = lmc_prime # lmc update is done in Julia code
+            self.set_parent(p_prime) # not sure if we need this or literally just set the parent manually without propagating
 
     def distance(self, other):
         return np.inf if other in self.infinite_dist_nodes else math.hypot(self.x - other.x, self.y - other.y)
@@ -97,16 +100,15 @@ class Node(Sequence):
 
 class RRTX:
     def __init__(self, x_start, x_goal, step_len, gamma_FOS, epsilon, 
-                 start_sample_rate, iter_max):
+                 bot_sample_rate, iter_max):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal, lmc=0.0, cost_to_goal=0.0)
         self.s_bot = self.s_start
         self.step_len = step_len
         self.epsilon = epsilon
-        self.start_sample_rate = start_sample_rate
+        self.bot_sample_rate = bot_sample_rate
         self.search_radius = 0.0
         self.iter_max = iter_max
-        # self.vertices_coor = [[self.s_goal.x, self.s_goal.y]] # for faster nearest neighbor lookup
         self.kd_tree = kdtree.create([self.s_goal])
         sys.setrecursionlimit(3000) # for the kd-tree cus it searches recursively
         self.tree_nodes = [self.s_goal] # this is V_T in the paper
@@ -114,7 +116,8 @@ class RRTX:
         self.Q = [] # priority queue of ComparableNodes
         self.path_to_goal = False
         self.robot_position = [self.s_bot.x, self.s_bot.y]
-        self.robot_speed = 2.0 # m/s
+        self.robot_speed = 1.0 # m/s
+        self.path = []
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
@@ -127,7 +130,9 @@ class RRTX:
         self.ax.set_ylim(self.env.y_range[0], self.env.y_range[1]+1)
         self.bg = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         self.edge_col = LineCollection([], colors='blue', linewidths=0.5)
+        self.path_col = LineCollection([], colors='red', linewidths=1.0)
         self.ax.add_collection(self.edge_col)
+        self.ax.add_collection(self.path_col)
 
         self.x_range = self.env.x_range
         self.y_range = self.env.y_range
@@ -152,23 +157,25 @@ class RRTX:
         # animation stuff
         plt.gca().set_aspect('equal', adjustable='box')
         self.edge_col.set_animated(True)
+        self.path_col.set_animated(True)
         plt.show(block=False)
         plt.pause(0.1)
         self.ax.draw_artist(self.edge_col)
         self.fig.canvas.blit(self.ax.bbox)
         start_time = time.time()
         first_time = True
+
         for i in range(self.iter_max):
+
+            # update robot position
             run_time = time.time() - start_time
-            # update robot position if it's moving
             if self.path_to_goal and run_time > 5:
                 # timing stuff
                 if first_time:
-                    self.prev_time = time.time()
+                    prev_time = time.time()
                     first_time = False
-                if i != 0:
-                    elapsed_time = time.time() - self.prev_time
-                self.prev_time = time.time()
+                elapsed_time = time.time() - prev_time
+                prev_time = time.time()
 
                 # update robot position
                 self.robot_position = self.utils.update_robot_position(
@@ -181,18 +188,23 @@ class RRTX:
                     self.s_bot = self.s_bot.parent
 
             # animate
-            # if i % 10 == 0:
-            # add like this for now
-            if run_time > 3 or run_time < 0.01:
+            if run_time > 5 or run_time < 0.01:
+
+                # # only update the plot every 10 iterations
+                # if i % 10 == 0:
                 self.edges = []
                 for node in self.tree_nodes:
                     if node.parent:
                         self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
                 self.edge_col.set_segments(np.array(self.edges))
                 self.fig.canvas.restore_region(self.bg)
+                self.ax.draw_artist(self.edge_col)
+
+                self.path_col.set_segments(np.array(self.path))
+                self.ax.draw_artist(self.path_col)
+
                 self.plotting.plot_env(self.ax)
                 self.plotting.plot_robot(self.ax, self.robot_position)
-                self.ax.draw_artist(self.edge_col)
                 self.fig.canvas.blit(self.ax.bbox)
                 self.fig.canvas.flush_events()
 
@@ -248,7 +260,6 @@ class RRTX:
 
         # get all edges that intersect the new circle obstacle
         # DOES EDGE SET "E" INCLUDE EDGES THAT HAVE BEEN REMOVED PREVIOUSLY??? NOT ACCOUNTING RIGHT NOW
-        
         E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
         for v, u in E_O:
             v.infinite_dist_nodes.add(u)
@@ -262,46 +273,58 @@ class RRTX:
     def verify_orphan(self, v):
         # Algorithm 10
         # if v is in Q, remove it from Q and add it to orphan_nodes
-        if v in self.Q:
-            self.Q.remove(v)
-            self.orphan_nodes.add(v)
+        key = self.node_in_queue(v)
+        if key is not None:
+            self.Q.remove((key, v))
+        self.orphan_nodes.add(v)
 
     def propagate_descendants(self):
         # Algorithm 9
-        # recursively add children of nodes in orphan_nodes to orphan_nodes
-        orphan_index = 0
-        while orphan_index < len(self.orphan_nodes):
-            self.orphan_nodes = self.orphan_nodes + self.orphan_nodes[orphan_index].children
-            orphan_index += 1
+        if not self.orphan_nodes:
+            return
+        # recursively add children of nodes in orphan_nodes to orphan_nodes using BFS
+        orphan_queue = deque(list(self.orphan_nodes))
+        while orphan_queue:
+            node = orphan_queue.pop()
+            for child in node.children:
+                orphan_queue.append(child)
+                self.orphan_nodes.add(child)
 
         # check if robot node got orphaned
         if self.s_bot in self.orphan_nodes:
+            print('robot node got orphaned')
             self.path_to_goal = False
         
-        # give all outgoing edges of nodes in orphan_nodes a cost of infinity and update their priority in Q
+        # put all outgoing neighbours of orphan nodes in Q and tell them to rewire
         for v in self.orphan_nodes:
-            for u in (v.all_out_neighbors() + set([v.parent])) - self.orphan_nodes:
-                u.cost_to_goal = np.inf # is this the right way to do it?
-                verify_queue(u)
+            for u in (v.all_out_neighbors().union(set([v.parent]))) - self.orphan_nodes:
+                u.cost_to_goal = np.inf
+                self.verify_queue(u)
         heapq.heapify(self.Q) # reheapify after keys changed to re-sort queue
 
-        # idk what this is
+        # clear orphans, set their costs to infinity, empty their parent
         for v in self.orphan_nodes:
-            self.orphan_nodes.remove(v)
+            # self.orphan_nodes.remove(v)
             v.cost_to_goal = np.inf
             v.lmc = np.inf
             if v.parent:
+                v.infinite_dist_nodes.add(v.parent)
+                v.parent.infinite_dist_nodes.add(v)
                 v.parent.children.remove(v)
-            v.parent = None
+                v.parent = None
+            self.tree_nodes.remove(v) # NOT IN THE PSEUDOCODE
+            self.kd_tree.remove(v)
+
+        self.orphan_nodes = set([]) # reset orphan_nodes to empty set
 
     def verify_queue(self, v):
         # Algorithm 13
         # this does not do the updating, it is done after all changes are made (in propagate_descendants)
         # if v is in Q, update its cost and position, otherwise just add it
-        try:
-            self.Q.remove((v.get_key(), v))
-        except ValueError:
-            pass
+        key = self.node_in_queue(v)
+        # if v is already in Q, remove it first before adding it with updated cost
+        if key is not None:
+            self.Q.remove((key, v))
         heapq.heappush(self.Q, (v.get_key(), v))
 
     def reduce_inconsistency(self):
@@ -309,6 +332,7 @@ class RRTX:
         while len(self.Q) > 0 and (self.Q[0][0] < self.s_bot.get_key() \
                 or self.s_bot.lmc != self.s_bot.cost_to_goal or np.isinf(self.s_bot.cost_to_goal) \
                 or self.s_bot in list(zip(*self.Q))[1]):
+
             v = heapq.heappop(self.Q)[1]
         
             if v.cost_to_goal - v.lmc > self.epsilon:
@@ -320,10 +344,11 @@ class RRTX:
     def add_node(self, node_new):
         self.tree_nodes.append(node_new)
         self.kd_tree.add(node_new)
-        if math.hypot((node_new.x - self.s_start.x), (node_new.y - self.s_start.y)) < 1e-6:
+        # if new node is at start, then path to goal is found
+        if node_new == self.s_bot:
             self.s_bot = node_new
             self.path_to_goal = True
-            # self.prev_time = time.time()
+            self.update_path(self.s_bot) # update path to goal for plotting
 
     def saturate(self, v_nearest, v):
         dist, theta = self.get_distance_and_angle(v_nearest, v)
@@ -354,11 +379,13 @@ class RRTX:
                     if u.cost_to_goal - u.lmc > self.epsilon:
                         self.verify_queue(u)
 
+        self.update_path(self.s_bot) # update path to goal for plotting
+
     def random_node(self):
         delta = self.utils.delta
 
-        if not self.path_to_goal and np.random.random() < self.start_sample_rate:
-            return Node((self.s_start.x, self.s_start.y))
+        if not self.path_to_goal and np.random.random() < self.bot_sample_rate:
+            return Node((self.s_bot.x, self.s_bot.y))
 
         return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
                      np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
@@ -389,17 +416,22 @@ class RRTX:
     def nearest(self, v):
         return self.kd_tree.search_nn((v.x, v.y))[0].data
 
-    def extract_path(self, node_end):
-        path = [[self.s_goal.x, self.s_goal.y]]
-        node = node_end
-
-        while node.parent is not None:
-            path.append([node.x, node.y])
+    def update_path(self, node):
+        self.path = []
+        while node.parent:
+            self.path.append(np.array([[node.x, node.y], [node.parent.x, node.parent.y]]))
             node = node.parent
-        path.append([node.x, node.y])
-
-        return path
     
+    def node_in_queue(self, node):
+        if not self.Q:
+            return None
+        keys, nodes = list(zip(*self.Q))
+        try:
+            idx = nodes.index(node)
+            return keys[idx]
+        except ValueError:
+            return None
+
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
         dx = node_end.x - node_start.x
@@ -423,7 +455,7 @@ def main():
         step_len=3.0, 
         gamma_FOS = 100.0,
         epsilon=0.05,
-        start_sample_rate=0.10,  
+        bot_sample_rate=0.10,  
         iter_max=10000)
     rrtx.planning()
 
