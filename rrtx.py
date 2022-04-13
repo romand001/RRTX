@@ -185,7 +185,7 @@ class RRTX:
                 # update robot position
                 self.robot_position = self.utils.update_robot_position(
                     self.robot_position, [self.s_bot.parent.x, self.s_bot.parent.y], 
-                    self.robot_speed, elapsed_time)
+                    self.robot_speed, 0.01)
                 
                 # update node that robot is "at"
                 if math.hypot(self.robot_position[0] - self.s_bot.parent.x,
@@ -207,8 +207,11 @@ class RRTX:
                     self.fig.canvas.restore_region(self.bg)
                     self.ax.draw_artist(self.edge_col)
 
+
                     self.path_col.set_segments(np.array(self.path))
                     self.ax.draw_artist(self.path_col)
+                    
+                    
 
                     self.plotting.plot_env(self.ax)
                     self.plotting.plot_robot(self.ax, self.robot_position)
@@ -326,11 +329,11 @@ class RRTX:
                 v.parent.children.remove(v)
                 v.parent = None
 
-            try:
-                self.tree_nodes.remove(v) # NOT IN THE PSEUDOCODE
-                self.kd_tree.remove(v)
-            except ValueError:
-                pass
+            # try:
+            #     self.tree_nodes.remove(v) # NOT IN THE PSEUDOCODE
+            #     self.kd_tree.remove(v)
+            # except ValueError:
+            #     pass
 
         self.orphan_nodes = set([]) # reset orphan_nodes to empty set
 
