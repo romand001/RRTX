@@ -187,7 +187,7 @@ class RRTX:
                 # update robot position
                 self.robot_position = self.utils.update_robot_position(
                     self.robot_position, [self.s_bot.parent.x, self.s_bot.parent.y], 
-                    self.robot_speed, elapsed_time)
+                    self.robot_speed, 0.01)
                 
                 # update node that robot is "at"
                 if math.hypot(self.robot_position[0] - self.s_bot.parent.x,
