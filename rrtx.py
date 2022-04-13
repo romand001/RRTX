@@ -397,8 +397,13 @@ class RRTX:
             return
         min_idx = int(np.argmin(costs))
         best_u = U[min_idx]
-        v.set_parent(best_u)
-        v.lmc = costs[min_idx] + best_u.lmc
+        if not self.utils.is_collision(best_u, v):
+            v.set_parent(best_u)
+            v.lmc = costs[min_idx] + best_u.lmc
+        else:
+            del U[min_idx]
+            self.find_parent(v, U)
+        
 
     def rewire_neighbours(self, v):
         # Algorithm 4
