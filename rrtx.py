@@ -85,7 +85,7 @@ class Node(Sequence):
 
         self.N_r_plus = set(N_r_plus_list)
 
-    def update_LMC(self, orphan_nodes, r, epsilon):
+    def update_LMC(self, orphan_nodes, r, epsilon, utils):
         # Algorithm 14
         # pass in orphan nodes from main code, make sure the set is maintained properly
         self.cull_neighbors(r)
@@ -94,7 +94,7 @@ class Node(Sequence):
         if not lmcs:
             return
         p_prime, lmc_prime = min(lmcs, key=lambda x: x[1])
-        if lmc_prime < self.lmc:
+        if lmc_prime < self.lmc and not utils.is_collision(self, p_prime): # added collision check, not in pseudocode
             self.lmc = lmc_prime # lmc update is done in Julia code
             self.set_parent(p_prime) # not sure if we need this or literally just set the parent manually without propagating
 
@@ -115,6 +115,7 @@ class RRTX:
         self.iter_max = iter_max
         self.kd_tree = kdtree.create([self.s_goal])
         sys.setrecursionlimit(3000) # for the kd-tree cus it searches recursively
+        self.all_nodes_coor = []
         self.tree_nodes = [self.s_goal] # this is V_T in the paper
         self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
         self.Q = [] # priority queue of ComparableNodes
@@ -133,6 +134,7 @@ class RRTX:
         self.ax.set_xlim(self.env.x_range[0], self.env.x_range[1]+1)
         self.ax.set_ylim(self.env.y_range[0], self.env.y_range[1]+1)
         self.bg = self.fig.canvas.copy_from_bbox(self.ax.bbox)
+        self.nodes_scatter = self.ax.scatter([], [], s=4, c='gray', alpha=0.5)
         self.edge_col = LineCollection([], colors='blue', linewidths=0.5)
         self.path_col = LineCollection([], colors='red', linewidths=1.0)
         self.ax.add_collection(self.edge_col)
@@ -203,15 +205,25 @@ class RRTX:
                     for node in self.tree_nodes:
                         if node.parent:
                             self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
-                    self.edge_col.set_segments(np.array(self.edges))
+
                     self.fig.canvas.restore_region(self.bg)
+
+                    # all nodes
+                    self.nodes_scatter.set_offsets(np.array(self.all_nodes_coor))
+                    self.ax.draw_artist(self.nodes_scatter)
+
+                    # tree edges
+                    self.edge_col.set_segments(np.array(self.edges))
                     self.ax.draw_artist(self.edge_col)
 
+                    # path to goal edges
                     self.path_col.set_segments(np.array(self.path))
                     self.ax.draw_artist(self.path_col)
 
+                    # obstacles and robot
                     self.plotting.plot_env(self.ax)
                     self.plotting.plot_robot(self.ax, self.robot_position)
+
                     self.fig.canvas.blit(self.ax.bbox)
                     self.fig.canvas.flush_events()
 
@@ -325,7 +337,6 @@ class RRTX:
                 v.parent.infinite_dist_nodes.add(v)
                 v.parent.children.remove(v)
                 v.parent = None
-
             try:
                 self.tree_nodes.remove(v) # NOT IN THE PSEUDOCODE
                 self.kd_tree.remove(v)
@@ -356,12 +367,13 @@ class RRTX:
                 print('something went wrong with the queue')
         
             if v.cost_to_goal - v.lmc > self.epsilon:
-                v.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon)
+                v.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon, self.utils)
                 self.rewire_neighbours(v)
             
             v.cost_to_goal = v.lmc
 
     def add_node(self, node_new):
+        self.all_nodes_coor.append(np.array([node_new.x, node_new.y])) # for plotting
         self.tree_nodes.append(node_new)
         self.kd_tree.add(node_new)
         # if new node is at start, then path to goal is found
