@@ -17,33 +17,22 @@ if __name__ == '__main__':
         'planning_time': 5.0,
     }
 
-    plot_params_1 = {
-        'robot': True,
-        'goal': True,
-        'tree': True,
-        'path': True,
-        'nodes': True,
-        'robot_color': 'purple',
-        'tree_color': 'green',
-        'path_color': 'red',
-    }
+    top_left = (4, 4)
+    top_right = (48, 4)
+    bottom_left = (4, 28)
+    bottom_right = (48, 28)
 
-    plot_params_2 = {
-        'robot': True,
-        'goal': True,
-        'tree': True,
-        'path': True,
-        'nodes': True,
-        'robot_color': 'brown',
-        'tree_color': 'blue',
-        'path_color': 'orange',
-    }   
+    r1_start = (top_left[0] + 1, top_left[1] + 1)
+    r1_goal = (bottom_right[0] - 1, bottom_right[1] - 1)
 
-    r1_start = (3, 20)
-    r1_goal = (20, 20)
+    r2_start = (top_right[0] + 1, top_right[1] + 1)
+    r2_goal = (bottom_left[0] - 1, bottom_left[1] - 1)
 
-    r2_start = (r1_goal[0] + 1, r1_goal[1])
-    r2_goal = (r1_start[0] + 1, r1_start[1])
+    r3_start = (bottom_left[0] + 1, bottom_left[1] + 1)
+    r3_goal = (top_right[0] - 1, top_right[1] - 1)
+
+    r4_start = (bottom_right[0] + 1, bottom_right[1] + 1)
+    r4_goal = (top_left[0] - 1, top_left[1] - 1)
 
     r1 = RRTX(
         x_start = r1_start,
@@ -55,7 +44,17 @@ if __name__ == '__main__':
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
         planning_time = rrt_params['planning_time'],
-        multi_robot = True
+        multi_robot = True,
+        plot_params = {
+            'robot': True,
+            'goal': True,
+            'tree': False,
+            'path': True,
+            'nodes': False,
+            'robot_color': 'blue',
+            'tree_color': 'blue',
+            'path_color': 'blue',
+        }
     )
 
     r2 = RRTX(
@@ -68,14 +67,69 @@ if __name__ == '__main__':
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
         planning_time = rrt_params['planning_time'],
-        multi_robot = True
+        multi_robot = True,
+        plot_params = {
+            'robot': True,
+            'goal': True,
+            'tree': False,
+            'path': True,
+            'nodes': False,
+            'robot_color': 'green',
+            'tree_color': 'green',
+            'path_color': 'green',
+        }
     )
 
-    r1.set_other_robots([r2])
-    r2.set_other_robots([r1])
+    r3 = RRTX(
+        x_start = r3_start,
+        x_goal = r3_goal,
+        robot_radius = rrt_params['robot_radius'],
+        step_len = rrt_params['step_len'],
+        move_dist = rrt_params['move_dist'],
+        gamma_FOS = rrt_params['gamma_FOS'],
+        epsilon = rrt_params['epsilon'],
+        bot_sample_rate = rrt_params['bot_sample_rate'],
+        planning_time = rrt_params['planning_time'],
+        multi_robot = True,
+        plot_params = {
+            'robot': True,
+            'goal': True,
+            'tree': False,
+            'path': True,
+            'nodes': False,
+            'robot_color': 'orange',
+            'tree_color': 'orange',
+            'path_color': 'orange',
+        }
+    )
 
-    robots = [r1, r2]
-    plot_params = [plot_params_1, plot_params_2]
+    r4 = RRTX(
+        x_start = r4_start,
+        x_goal = r4_goal,
+        robot_radius = rrt_params['robot_radius'],
+        step_len = rrt_params['step_len'],
+        move_dist = rrt_params['move_dist'],
+        gamma_FOS = rrt_params['gamma_FOS'],
+        epsilon = rrt_params['epsilon'],
+        bot_sample_rate = rrt_params['bot_sample_rate'],
+        planning_time = rrt_params['planning_time'],
+        multi_robot = True,
+        plot_params = {
+            'robot': True,
+            'goal': True,
+            'tree': False,
+            'path': True,
+            'nodes': False,
+            'robot_color': 'brown',
+            'tree_color': 'brown',
+            'path_color': 'brown',
+        }
+    )
+
+    robots = [r1, r2, r3, r4]
+
+    for robot in robots:
+        robot.set_other_robots([other for other in robots if other != robot])
 
     # plotting stuff
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -97,11 +151,11 @@ if __name__ == '__main__':
             robot.step()
 
         # update plot
-        if robots[0].started and i % 10 == 0:
+        if robots[0].started and i % 30 == 0:
             fig.canvas.restore_region(bg)
             mrh.env_plot(ax, robots[0]) # pass in any robot, they all know the environment
-            for robot_idx in range(len(robots)):
-                mrh.single_bot_plot(ax, robots[robot_idx], plot_params[robot_idx])
+            for robot in robots:
+                mrh.single_bot_plot(ax, robot)
             fig.canvas.blit(ax.bbox)
             fig.canvas.flush_events()
 

@@ -42,7 +42,8 @@ def env_plot(ax, rrtx):
         ax.add_patch(circle_patch)
         ax.draw_artist(circle_patch)
 
-def single_bot_plot(ax, rrtx, params):
+def single_bot_plot(ax, rrtx):
+    params = rrtx.plot_params
     # robot
     if params['robot']:
         bot_patch = patches.Circle(
