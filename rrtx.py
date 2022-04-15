@@ -323,11 +323,19 @@ class RRTX:
                 
     def update_click_obstacles(self, event):
         # Algorithm 8, for obstacles added by clicking
-        x, y = int(event.xdata), int(event.ydata)
-        self.add_new_obstacle([x, y, 2])
-        self.propagate_descendants()
-        self.verify_queue(self.s_bot)
-        self.reduce_inconsistency()
+        # Algorithm 8
+        if event.button == 1: # add obstacle
+            x, y = int(event.xdata), int(event.ydata)
+            self.add_new_obstacle([x, y, 2])
+            self.propagate_descendants()
+            self.verify_queue(self.s_bot)
+            self.reduce_inconsistency()
+        if event.button == 3 : # remove obstacle on right click
+            # find which obstacle was clicked
+            obs, shape = self.find_obstacle(event.xdata, event.ydata)
+            if obs:
+                self.remove_obstacle(obs, shape)
+            self.reduce_inconsistency()
 
     def update_robot_obstacles(self, delta):
         # Algorithm 8, for robot obstacles
@@ -341,7 +349,7 @@ class RRTX:
 
         # remove obstacles from their old positions
         for idx in idx_changed:
-            self.remove_obstacle(self.other_robot_obstacles[idx])
+            self.remove_obstacle(self.other_robot_obstacles[idx], 'robot')
 
         self.reduce_inconsistency()
 
@@ -387,12 +395,34 @@ class RRTX:
                 
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
-    def remove_obstacle(self, obs):
+    def remove_obstacle(self, obs, shape):
         # Algorithm 11
         if self.obs_robot:
             self.obs_robot.pop()
-        # UNIMPLEMENTED
-        pass
+        # Find all nodes going through new region
+        if shape == 'circle' or shape == 'robot': 
+            nodes_affected = self.find_nodes_in_range(obs[:2], self.utils.delta + self.step_len + obs[2]) # robot size+step length + obstacle size
+        elif shape == 'rectangle':
+            nodes_affected = self.find_nodes_in_range(obs[:2], self.utils.delta + self.step_len + max(obs[2],obs[3]))
+            
+        # remove obstacle from list if applicable
+        if shape == 'circle':
+            self.obs_circle.remove(obs)
+            self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
+            self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking\
+            self.update_gamma() # free space volume changed, so gamma must change too
+        elif shape == 'rectangle':
+            self.obs_rectangle.remove(obs)
+            self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
+            self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking\
+            self.update_gamma() # free space volume changed, so gamma must change too
+
+        for node in nodes_affected:
+            node.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon, self.utils)
+            if node.lmc != node.cost_to_goal:
+                self.verify_queue(node)
+
+
         
     def verify_orphan(self, v):
         # Algorithm 10
@@ -566,6 +596,16 @@ class RRTX:
             return keys[idx]
         except ValueError:
             return None
+    def find_obstacle(self, a , b):
+        for (x, y, r) in self.obs_circle:
+            if math.hypot(a - x, b - y) <= r:
+                return ([x, y, r], 'circle')
+
+        for (x, y, w, h) in self.obs_rectangle:
+            if 0 <= a - (x) <= w + 2 and 0 <= b - (y) <= h :
+                return ([x, y, w, h], 'rectangle')
+    def find_nodes_in_range(self, pos, r):
+        return self.kd_tree.search_nn_dist((pos[0], pos[1]), r)
 
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
