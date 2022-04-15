@@ -11,10 +11,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) +
                 "/../../Sampling_based_Planning/")
 
-# from Sampling_based_Planning.rrt_2D import env
-# from Sampling_based_Planning.rrt_2D.rrt import Node
 import env
-from rrtx import Node
+# from rrtx import Node
 
 
 class Utils:
@@ -58,8 +56,10 @@ class Utils:
         t2 = np.dot(v1, v3) / div
 
         if t1 >= 0 and 0 <= t2 <= 1:
-            shot = Node((o[0] + t1 * d[0], o[1] + t1 * d[1]))
-            dist_obs = self.get_dist(start, shot)
+            # shot = Node((o[0] + t1 * d[0], o[1] + t1 * d[1]))
+            # dist_obs = self.get_dist(start, shot)
+            dist_obs = math.hypot(start.x - (o[0] + t1 * d[0]), 
+                                  start.y - (o[1] + t1 * d[1]))
             dist_seg = self.get_dist(start, end)
             if dist_obs <= dist_seg:
                 return True
@@ -76,8 +76,10 @@ class Utils:
         t = np.dot([a[0] - o[0], a[1] - o[1]], d) / d2
 
         if 0 <= t <= 1:
-            shot = Node((o[0] + t * d[0], o[1] + t * d[1]))
-            if self.get_dist(shot, Node(a)) <= r + delta:
+            # shot = Node((o[0] + t * d[0], o[1] + t * d[1]))
+            # if self.get_dist(shot, Node(a)) <= r + delta:
+            if math.hypot(a[0] - (o[0] + t * d[0]), 
+                          a[1] - (o[1] + t * d[1])) <= r + delta:
                 return True
 
         return False
@@ -125,10 +127,20 @@ class Utils:
         return False
 
     @staticmethod
-    def update_robot_position(pos, dest, speed, dt):
+    def update_robot_position(pos, bot, speed, dt):
+
+        dx = bot.parent.x - pos[0]
+        dy = bot.parent.y - pos[1]
+
         dist = speed * dt
-        angle = math.atan2(dest[1] - pos[1], dest[0] - pos[0])
-        return [pos[0] + dist * math.cos(angle), pos[1] + dist * math.sin(angle)]
+        angle = math.atan2(dy, dx)
+
+        new_pos = [pos[0] + dist * math.cos(angle), pos[1] + dist * math.sin(angle)]
+
+        if math.hypot(dx, dy) > 0.05:
+            return bot, new_pos
+        else:
+            return bot.parent, new_pos
 
     @staticmethod
     def get_ray(start, end):

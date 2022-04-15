@@ -75,7 +75,7 @@ class Node(Sequence):
         N_r_plus_list = list(self.N_r_plus) # can't remove from set while iterating over it
         for u in N_r_plus_list:
             # switched order of conditions in if statement to be faster
-            if self.parent != u and r < self.distance(u):
+            if self.parent and self.parent != u and r < self.distance(u):
                 N_r_plus_list.remove(u)
                 try:
                     u.N_r_minus.remove(self)
@@ -103,16 +103,19 @@ class Node(Sequence):
 
 
 class RRTX:
-    def __init__(self, x_start, x_goal, step_len, gamma_FOS, epsilon, 
-                 bot_sample_rate, iter_max):
+
+    def __init__(self, x_start, x_goal, robot_radius, step_len, move_dist, gamma_FOS, epsilon, 
+                 bot_sample_rate, planning_time, multi_robot=False, iter_max=10_000):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal, lmc=0.0, cost_to_goal=0.0)
         self.s_bot = self.s_start
+        self.robot_radius = robot_radius
         self.step_len = step_len
+        self.move_dist = move_dist
         self.epsilon = epsilon
         self.bot_sample_rate = bot_sample_rate
+        self.planning_time = planning_time
         self.search_radius = 0.0
-        self.iter_max = iter_max
         self.kd_tree = kdtree.create([self.s_goal])
         sys.setrecursionlimit(3000) # for the kd-tree cus it searches recursively
         self.all_nodes_coor = []
@@ -123,28 +126,19 @@ class RRTX:
         self.robot_position = [self.s_bot.x, self.s_bot.y]
         self.robot_speed = 1.0 # m/s
         self.path = []
+        self.other_robots = [] # list of RRTX objects
+        self.other_robot_obstacles = [] # list of circular obstacles (x, y, r)
 
         self.env = env.Env()
         self.plotting = plotting.Plotting(x_start, x_goal)
         self.utils = utils.Utils()
-
-        # plotting
-        self.fig, self.ax = plt.subplots(figsize=(12, 8))
-        self.fig.suptitle('RRTX')
-        self.ax.set_xlim(self.env.x_range[0], self.env.x_range[1]+1)
-        self.ax.set_ylim(self.env.y_range[0], self.env.y_range[1]+1)
-        self.bg = self.fig.canvas.copy_from_bbox(self.ax.bbox)
-        self.nodes_scatter = self.ax.scatter([], [], s=4, c='gray', alpha=0.5)
-        self.edge_col = LineCollection([], colors='blue', linewidths=0.5)
-        self.path_col = LineCollection([], colors='red', linewidths=1.0)
-        self.ax.add_collection(self.edge_col)
-        self.ax.add_collection(self.path_col)
 
         self.x_range = self.env.x_range
         self.y_range = self.env.y_range
         self.obs_circle = self.env.obs_circle
         self.obs_rectangle = self.env.obs_rectangle
         self.obs_boundary = self.env.obs_boundary
+        self.obs_robot = []
 
         # for gamma computation
         self.d = 2 # dimension of the state space
@@ -152,13 +146,33 @@ class RRTX:
         self.gamma_FOS = gamma_FOS # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
         self.update_gamma() # initialize gamma
 
+        self.started = False
+        self.start_time = time.time()
+
+        # single robot stuff
+        if not multi_robot:
+            # plotting
+            self.fig, self.ax = plt.subplots(figsize=(12, 8))
+            self.fig.suptitle('RRTX')
+            self.ax.set_xlim(self.env.x_range[0], self.env.x_range[1]+1)
+            self.ax.set_ylim(self.env.y_range[0], self.env.y_range[1]+1)
+            self.bg = self.fig.canvas.copy_from_bbox(self.ax.bbox)
+            self.nodes_scatter = self.ax.scatter([], [], s=4, c='gray', alpha=0.5)
+            self.edge_col = LineCollection([], colors='blue', linewidths=0.5)
+            self.path_col = LineCollection([], colors='red', linewidths=1.0)
+            self.ax.add_collection(self.edge_col)
+            self.ax.add_collection(self.path_col)
+
+            # other
+            self.iter_max = iter_max
+
     def planning(self):
 
         # set seed for reproducibility
         np.random.seed(0)
 
         # set up event handling
-        self.fig.canvas.mpl_connect('button_press_event', self.update_obstacles)
+        self.fig.canvas.mpl_connect('button_press_event', self.update_click_obstacles)
 
         # animation stuff
         plt.gca().set_aspect('equal', adjustable='box')
@@ -184,15 +198,10 @@ class RRTX:
                 elapsed_time = time.time() - prev_time
                 prev_time = time.time()
 
-                # update robot position
-                self.robot_position = self.utils.update_robot_position(
-                    self.robot_position, [self.s_bot.parent.x, self.s_bot.parent.y], 
+                # update robot position and maybe the node it is at
+                self.s_bot, self.robot_position = self.utils.update_robot_position(
+                    self.robot_position, self.s_bot, 
                     self.robot_speed, 0.01)
-                
-                # update node that robot is "at"
-                if math.hypot(self.robot_position[0] - self.s_bot.parent.x,
-                              self.robot_position[1] - self.s_bot.parent.y) < 0.05:
-                    self.s_bot = self.s_bot.parent
 
             # animate
             if run_time > 5 or run_time < 0.01:
@@ -220,11 +229,9 @@ class RRTX:
                     self.path_col.set_segments(np.array(self.path))
                     self.ax.draw_artist(self.path_col)
                     
-                    
-
                     # obstacles and robot
                     self.plotting.plot_env(self.ax)
-                    self.plotting.plot_robot(self.ax, self.robot_position)
+                    self.plotting.plot_robot(self.ax, self.robot_position, self.robot_radius)
 
                     self.fig.canvas.blit(self.ax.bbox)
                     self.fig.canvas.flush_events()
@@ -243,6 +250,48 @@ class RRTX:
 
             if self.s_bot.cost_to_goal < np.inf:
                 self.path_to_goal = True
+
+    def step(self):
+        # check if planning time is over
+        if not self.started and time.time() - self.start_time > self.planning_time:
+            self.started = True
+        
+        # if planning time is over and we have a path, we can move the robot
+        if self.started and self.path_to_goal:
+            # update robot position and maybe the node it is at
+            self.s_bot, self.robot_position = self.utils.update_robot_position(
+                self.robot_position, self.s_bot, self.robot_speed, self.move_dist
+            )
+
+        ''' MAIN ALGORITHM BEGINS '''
+
+        self.search_radius = self.shrinking_ball_radius()
+
+        self.update_robot_obstacles(delta=0.5)
+
+        v = self.random_node()
+        v_nearest = self.nearest(v)
+        v = self.saturate(v_nearest, v)
+
+        if v and not self.utils.is_collision(v_nearest, v):
+            self.extend(v, v_nearest)
+            if v.parent:
+                self.rewire_neighbours(v)
+                self.reduce_inconsistency()
+
+        if self.s_bot.cost_to_goal < np.inf:
+            self.path_to_goal = True
+
+    def set_other_robots(self, other_robots):
+        # set the other robots that this robot should know about, called by multirobot.py
+        self.other_robots = other_robots
+        self.other_robot_obstacles = []
+        for robot in other_robots:
+            self.other_robot_obstacles.append([
+                    robot.robot_position[0],
+                    robot.robot_position[1],
+                    robot.robot_radius
+            ])
 
     def extend(self, v, v_nearest):
         # Algorithm 2
@@ -265,21 +314,54 @@ class RRTX:
                 u.N_r_plus.add(v)
                 u.N_r_minus.add(v)
                 
-    def update_obstacles(self, event):
-        # Algorithm 8
+    def update_click_obstacles(self, event):
+        # Algorithm 8, for obstacles added my clicking
         x, y = int(event.xdata), int(event.ydata)
         self.add_new_obstacle([x, y, 2])
         self.propagate_descendants()
         self.verify_queue(self.s_bot)
         self.reduce_inconsistency()
 
-    def add_new_obstacle(self, obs):
+    def update_robot_obstacles(self, delta):
+        # Algorithm 8, for robot obstacles
+        # delta is distance that robot needs to move for obstackes to be updated
+        idx_changed = []
+        for idx, other in enumerate(self.other_robots):
+            # check if this other robot has moved significantly
+            if math.hypot(other.robot_position[0] - self.other_robot_obstacles[idx][0],
+                          other.robot_position[1] - self.other_robot_obstacles[idx][1]) > delta:
+                idx_changed.append(idx)
+
+        # remove obstacles from their old positions
+        for idx in idx_changed:
+            self.remove_obstacle(self.other_robot_obstacles[idx])
+            self.other_robot_obstacles[idx] = [
+                self.other_robots[idx].robot_position[0], 
+                self.other_robots[idx].robot_position[1], 
+                self.other_robots[idx].robot_radius
+            ]
+
+        self.reduce_inconsistency()
+
+        # add obstacles to their new positions
+        for idx in idx_changed:
+            self.add_new_obstacle(self.other_robot_obstacles[idx], robot=True)
+
+        self.propagate_descendants()
+        self.verify_queue(self.s_bot)
+        self.reduce_inconsistency()
+
+    def add_new_obstacle(self, obs, robot=False):
         # Algorithm 12
         x, y, r = obs
-        print("Add circle obstacle at: s =", x, ",", "y =", y)
-        self.obs_circle.append(obs)
-        self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
-        self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking
+        if not robot:
+            print("Add circle obstacle at: s =", x, ",", "y =", y)
+            self.obs_circle.append(obs)
+            self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
+            self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking
+        else:
+            self.obs_robot.append(obs)
+
         self.update_gamma() # free space volume changed, so gamma must change too
 
         # get all edges that intersect the new circle obstacle
@@ -296,6 +378,10 @@ class RRTX:
                 # v.parent = None 
                 
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
+
+    def remove_obstacle(self, obs):
+        # UNIMPLEMENTED
+        pass
 
     def verify_orphan(self, v):
         # Algorithm 10
@@ -406,7 +492,6 @@ class RRTX:
             del U[min_idx]
             self.find_parent(v, U)
         
-
     def rewire_neighbours(self, v):
         # Algorithm 4
         if v.cost_to_goal - v.lmc > self.epsilon:
@@ -491,11 +576,14 @@ def main():
     rrtx = RRTX(
         x_start=x_start, 
         x_goal=x_goal, 
+        robot_radius=0.5,
         step_len=3.0, 
+        move_dist=0.01,
         gamma_FOS = 100.0,
         epsilon=0.05,
-        bot_sample_rate=0.10,  
-        iter_max=10000)
+        bot_sample_rate=0.10,
+        planning_time=5.0,
+        iter_max=10_000)
     rrtx.planning()
 
 

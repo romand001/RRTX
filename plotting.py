@@ -80,7 +80,6 @@ class Plotting:
             facecolor='red',
             fill=True
         )
-        
         ax.add_patch(goal_patch)
         ax.draw_artist(goal_patch)
 
@@ -117,9 +116,9 @@ class Plotting:
             ax.add_patch(circle_patch)
             ax.draw_artist(circle_patch)
 
-    def plot_robot(self, ax, robot_position):
+    def plot_robot(self, ax, robot_position, robot_radius):
         start_patch = patches.Circle(
-            (robot_position[0], robot_position[1]), 0.5,
+            (robot_position[0], robot_position[1]), robot_radius,
             edgecolor='green',
             facecolor='green',
             fill=True
