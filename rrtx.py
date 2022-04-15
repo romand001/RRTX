@@ -159,6 +159,7 @@ class RRTX:
 
         # set up event handling
         self.fig.canvas.mpl_connect('button_press_event', self.update_obstacles)
+        self.fig.canvas.mpl_connect('pick_event', self.update_obstacles)
 
         # animation stuff
         plt.gca().set_aspect('equal', adjustable='box')
@@ -267,11 +268,51 @@ class RRTX:
                 
     def update_obstacles(self, event):
         # Algorithm 8
-        x, y = int(event.xdata), int(event.ydata)
-        self.add_new_obstacle([x, y, 2])
-        self.propagate_descendants()
-        self.verify_queue(self.s_bot)
-        self.reduce_inconsistency()
+        if event.name == 'button_press_event':
+            if event.button == 1: # add obstacle
+                x, y = int(event.xdata), int(event.ydata)
+                self.add_new_obstacle([x, y, 2])
+                self.propagate_descendants()
+                self.verify_queue(self.s_bot)
+                self.reduce_inconsistency()
+        if event.name == 'pick_event':
+            if event.mouseevent.button == 3: # remove obstacle on right click
+                if isinstance(event.artist, plotting.patches.Circle):
+                    (x, y) = event.artist.center
+                    r =  event.artist.radius
+                    self.remove_obstacles([x,y,r], 'circle')
+                    self.ax.remove(event.artist)
+                    #picking all obstacles in figure????
+                if isinstance(event.artist, plotting.patches.Rectangle):
+                    (ox,oy,w,h) = (event.artist._x0, event.artist._y0, event.artist._width, event.artist._height)
+                    self.remove_obstacles([ox,oy,w,h], 'rectangle')
+                    self.ax.remove(event.artist)
+                    
+                self.reduce_inconsistency()
+    
+    def remove_obstacles(self, obs, shape):
+        # Algorithm 11
+
+        # Find all nodes going through new region
+        if shape == 'circle': 
+            nodes_affected = self.find_nodes_in_range(obs[:2], self.utils.delta + self.step_len + obs[2]) # robot size+step length + obstacle size
+        elif shape == 'rectangle':
+            nodes_affected = self.find_nodes_in_range(obs[:2], self.utils.delta + self.step_len + max(obs[2],obs[3]))
+        
+        # remove obstacle from list
+        if shape == 'circle':
+            self.obs_circle.remove(obs)
+        elif shape == 'rectangle':
+            self.obs_rectangle.remove(obs)
+        self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
+        self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking\
+        self.update_gamma() # free space volume changed, so gamma must change too
+        
+        for node in nodes_affected:
+            node.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon, self.utils)
+            if node.lmc != node.cost_to_goal:
+                self.verify_queue(node)
+        
 
     def add_new_obstacle(self, obs):
         # Algorithm 12
@@ -284,16 +325,17 @@ class RRTX:
 
         # get all edges that intersect the new circle obstacle
         # E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
-        E_O = [(v, u) for v in self.tree_nodes for u in v.all_out_neighbors() 
-               if self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
-        for v, u in E_O:
-            v.infinite_dist_nodes.add(u)
-            u.infinite_dist_nodes.add(v)
-            if v.parent and v.parent == u:
-                self.verify_orphan(v)
-                # should theoretically check if the robot is on this edge now, but we do not
-                # v.parent.children.remove(v) # these two lines are from the Julia code
-                # v.parent = None 
+        affected_nodes = self.find_nodes_in_range(obs[:2], self.utils.delta + self.step_len + obs[2])
+
+        for v in affected_nodes:
+            for u in v.all_out_neighbors():
+                v.infinite_dist_nodes.add(u)
+                u.infinite_dist_nodes.add(v)
+                if v.parent and v.parent == u:
+                    self.verify_orphan(v)
+                    # should theoretically check if the robot is on this edge now, but we do not
+                    # v.parent.children.remove(v) # these two lines are from the Julia code
+                    # v.parent = None 
                 
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
@@ -451,6 +493,9 @@ class RRTX:
 
     def near(self, v):
         return self.kd_tree.search_nn_dist((v.x, v.y), self.search_radius)
+    
+    def find_nodes_in_range(self, pos, r):
+        return self.kd_tree.search_nn_dist((pos[0], pos[1]), r)
 
     def nearest(self, v):
         return self.kd_tree.search_nn((v.x, v.y))[0].data

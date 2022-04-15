@@ -101,7 +101,8 @@ class Plotting:
                 (ox, oy), w, h,
                 edgecolor='black',
                 facecolor='gray',
-                fill=True
+                fill=True,
+                picker=True
             )
             ax.add_patch(rect_patch)
             ax.draw_artist(rect_patch)
@@ -112,7 +113,8 @@ class Plotting:
                 (ox, oy), r,
                 edgecolor='black',
                 facecolor='gray',
-                fill=True
+                fill=True,
+                picker = True 
             )
             ax.add_patch(circle_patch)
             ax.draw_artist(circle_patch)
