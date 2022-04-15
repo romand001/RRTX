@@ -159,8 +159,7 @@ class RRTX:
 
         # set up event handling
         self.fig.canvas.mpl_connect('button_press_event', self.update_obstacles)
-        self.fig.canvas.mpl_connect('pick_event', self.update_obstacles)
-
+     
         # animation stuff
         plt.gca().set_aspect('equal', adjustable='box')
         self.edge_col.set_animated(True)
@@ -197,7 +196,7 @@ class RRTX:
 
             # animate
             if run_time > 5 or run_time < 0.01:
-
+                
                 # only update the plot at 5 Hz
                 elapsed_plotting = time.time() - prev_plotting
                 if elapsed_plotting >= 0.2:
@@ -268,27 +267,18 @@ class RRTX:
                 
     def update_obstacles(self, event):
         # Algorithm 8
-        if event.name == 'button_press_event':
-            if event.button == 1: # add obstacle
-                x, y = int(event.xdata), int(event.ydata)
-                self.add_new_obstacle([x, y, 2])
-                self.propagate_descendants()
-                self.verify_queue(self.s_bot)
-                self.reduce_inconsistency()
-        if event.name == 'pick_event':
-            if event.mouseevent.button == 3: # remove obstacle on right click
-                if isinstance(event.artist, plotting.patches.Circle):
-                    (x, y) = event.artist.center
-                    r =  event.artist.radius
-                    self.remove_obstacles([x,y,r], 'circle')
-                    self.ax.remove(event.artist)
-                    #picking all obstacles in figure????
-                if isinstance(event.artist, plotting.patches.Rectangle):
-                    (ox,oy,w,h) = (event.artist._x0, event.artist._y0, event.artist._width, event.artist._height)
-                    self.remove_obstacles([ox,oy,w,h], 'rectangle')
-                    self.ax.remove(event.artist)
-                    
-                self.reduce_inconsistency()
+        if event.button == 1: # add obstacle
+            x, y = int(event.xdata), int(event.ydata)
+            self.add_new_obstacle([x, y, 2])
+            self.propagate_descendants()
+            self.verify_queue(self.s_bot)
+            self.reduce_inconsistency()
+        if event.button == 3 : # remove obstacle on right click
+            # find which obstacle was clicked
+            obs, shape = self.find_obstacle(event.xdata, event.ydata)
+            if obs:
+                self.remove_obstacles(obs, shape)
+            self.reduce_inconsistency()
     
     def remove_obstacles(self, obs, shape):
         # Algorithm 11
@@ -329,13 +319,14 @@ class RRTX:
 
         for v in affected_nodes:
             for u in v.all_out_neighbors():
-                v.infinite_dist_nodes.add(u)
-                u.infinite_dist_nodes.add(v)
-                if v.parent and v.parent == u:
-                    self.verify_orphan(v)
-                    # should theoretically check if the robot is on this edge now, but we do not
-                    # v.parent.children.remove(v) # these two lines are from the Julia code
-                    # v.parent = None 
+                if self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2]):
+                    v.infinite_dist_nodes.add(u)
+                    u.infinite_dist_nodes.add(v)
+                    if v.parent and v.parent == u:
+                        self.verify_orphan(v)
+                        # should theoretically check if the robot is on this edge now, but we do not
+                        # v.parent.children.remove(v) # these two lines are from the Julia code
+                        # v.parent = None 
                 
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
@@ -515,7 +506,18 @@ class RRTX:
             return keys[idx]
         except ValueError:
             return None
+            
+    def find_obstacle(self, a , b):
+        for (x, y, r) in self.obs_circle:
+            if math.hypot(a - x, b - y) <= r:
+                return ([x, y, r], 'circle')
 
+        for (x, y, w, h) in self.obs_rectangle:
+            if 0 <= a - (x) <= w + 2 and 0 <= b - (y) <= h :
+                return ([x, y, w, h], 'rectangle')
+        
+        
+        
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
         dx = node_end.x - node_start.x
