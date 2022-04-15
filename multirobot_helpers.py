@@ -3,10 +3,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.collections import LineCollection
 
-def update_click_obstacles(self, event, bots):
+def update_click_obstacles(event, robots):
     # this grabs event from matplotlib and passes it on to all robots
-    for bot in bots:
-        bot.update_click_obstacles(event)
+    for robot in robots:
+        robot.update_click_obstacles(event)
 
 def env_plot(ax, rrtx):
     # boundary obstacles

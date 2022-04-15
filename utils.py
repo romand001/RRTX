@@ -128,7 +128,8 @@ class Utils:
 
     @staticmethod
     def update_robot_position(pos, bot, speed, dt):
-
+        if not bot.parent:
+            return bot, pos
         dx = bot.parent.x - pos[0]
         dy = bot.parent.y - pos[1]
 

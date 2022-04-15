@@ -1,12 +1,13 @@
+import matplotlib.pyplot as plt
 from functools import partial
 
 from rrtx import RRTX, Node
-from multirobot_helper import *
+import multirobot_helpers as mrh
 
 if __name__ == '__main__':
 
     rrt_params = {
-        'iter_max': 10_000,
+        'iter_max': 100_000,
         'robot_radius': 0.5,
         'step_len': 3.0,
         'move_dist': 0.01, # must be < 0.05 bc that's used in update_robot_position()
@@ -88,7 +89,7 @@ if __name__ == '__main__':
     fig.canvas.blit(ax.bbox)
 
     # event handling
-    fig.canvas.mpl_connect('button_press_event', partial(update_click_obstacles, param=robots))
+    fig.canvas.mpl_connect('button_press_event', partial(mrh.update_click_obstacles, robots=robots))
 
     for i in range(rrt_params['iter_max']):
         # RRTX step for each robot
@@ -98,9 +99,9 @@ if __name__ == '__main__':
         # update plot
         if robots[0].started and i % 10 == 0:
             fig.canvas.restore_region(bg)
-            env_plot(ax, robots[0]) # pass in any robot, they all know the environment
+            mrh.env_plot(ax, robots[0]) # pass in any robot, they all know the environment
             for robot_idx in range(len(robots)):
-                single_bot_plot(ax, robots[robot_idx], plot_params[robot_idx])
+                mrh.single_bot_plot(ax, robots[robot_idx], plot_params[robot_idx])
             fig.canvas.blit(ax.bbox)
             fig.canvas.flush_events()
 

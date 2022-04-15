@@ -122,7 +122,6 @@ class RRTX:
         self.tree_nodes = [self.s_goal] # this is V_T in the paper
         self.orphan_nodes = set([]) # this is V_T^C in the paper, i.e., nodes that have been disconnected from tree due to obstacles
         self.Q = [] # priority queue of ComparableNodes
-        self.path_to_goal = False
         self.robot_position = [self.s_bot.x, self.s_bot.y]
         self.robot_speed = 1.0 # m/s
         self.path = []
@@ -147,6 +146,8 @@ class RRTX:
         self.update_gamma() # initialize gamma
 
         self.started = False
+        self.path_to_goal = False
+        self.reached_goal = False
         self.start_time = time.time()
 
         # single robot stuff
@@ -252,6 +253,10 @@ class RRTX:
                 self.path_to_goal = True
 
     def step(self):
+        # if we reached the goal, just return
+        if self.reached_goal:
+            return
+
         # check if planning time is over
         if not self.started and time.time() - self.start_time > self.planning_time:
             self.started = True
@@ -267,7 +272,7 @@ class RRTX:
 
         self.search_radius = self.shrinking_ball_radius()
 
-        self.update_robot_obstacles(delta=0.5)
+        self.update_robot_obstacles(delta=0.5) # update other robots as obstacles of this robot
 
         v = self.random_node()
         v_nearest = self.nearest(v)
@@ -281,6 +286,8 @@ class RRTX:
 
         if self.s_bot.cost_to_goal < np.inf:
             self.path_to_goal = True
+            if self.s_bot == self.s_goal:
+                self.reached_goal = True
 
     def set_other_robots(self, other_robots):
         # set the other robots that this robot should know about, called by multirobot.py
@@ -315,7 +322,7 @@ class RRTX:
                 u.N_r_minus.add(v)
                 
     def update_click_obstacles(self, event):
-        # Algorithm 8, for obstacles added my clicking
+        # Algorithm 8, for obstacles added by clicking
         x, y = int(event.xdata), int(event.ydata)
         self.add_new_obstacle([x, y, 2])
         self.propagate_descendants()
@@ -335,16 +342,17 @@ class RRTX:
         # remove obstacles from their old positions
         for idx in idx_changed:
             self.remove_obstacle(self.other_robot_obstacles[idx])
-            self.other_robot_obstacles[idx] = [
-                self.other_robots[idx].robot_position[0], 
-                self.other_robots[idx].robot_position[1], 
-                self.other_robots[idx].robot_radius
-            ]
 
         self.reduce_inconsistency()
 
         # add obstacles to their new positions
         for idx in idx_changed:
+            # first manage obstacle lists
+            self.other_robot_obstacles[idx] = [
+                self.other_robots[idx].robot_position[0], 
+                self.other_robots[idx].robot_position[1], 
+                self.other_robots[idx].robot_radius
+            ]
             self.add_new_obstacle(self.other_robot_obstacles[idx], robot=True)
 
         self.propagate_descendants()
@@ -380,9 +388,12 @@ class RRTX:
         heapq.heapify(self.Q) # reheapify after removing a bunch of elements and ruining queue
 
     def remove_obstacle(self, obs):
+        # Algorithm 11
+        if self.obs_robot:
+            self.obs_robot.pop()
         # UNIMPLEMENTED
         pass
-
+        
     def verify_orphan(self, v):
         # Algorithm 10
         # if v is in Q, remove it from Q and add it to orphan_nodes
