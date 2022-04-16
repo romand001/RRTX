@@ -329,6 +329,7 @@ class RRTX:
             self.add_new_obstacle([x, y, 2])
             self.propagate_descendants()
             self.verify_queue(self.s_bot)
+            heapq.heapify(self.Q)
             self.reduce_inconsistency()
         if event.button == 3 : # remove obstacle on right click
             # find which obstacle was clicked
@@ -365,6 +366,7 @@ class RRTX:
 
         self.propagate_descendants()
         self.verify_queue(self.s_bot)
+        heapq.heapify(self.Q)
         self.reduce_inconsistency()
 
     def add_new_obstacle(self, obs, robot=False):
@@ -421,6 +423,7 @@ class RRTX:
             node.update_LMC(self.orphan_nodes, self.search_radius, self.epsilon, self.utils)
             if node.lmc != node.cost_to_goal:
                 self.verify_queue(node)
+        heapq.heapify(self.Q)
 
 
         
@@ -491,7 +494,6 @@ class RRTX:
                 or self.s_bot in list(zip(*self.Q))[1]):
 
             try:
-                heapq.heapify(self.Q)
                 v = heapq.heappop(self.Q)[1]
             except TypeError:
                 print('something went wrong with the queue')
@@ -544,6 +546,7 @@ class RRTX:
                     u.set_parent(v)
                     if u.cost_to_goal - u.lmc > self.epsilon:
                         self.verify_queue(u)
+        heapq.heapify(self.Q)
 
         self.update_path(self.s_bot) # update path to goal for plotting
 
