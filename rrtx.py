@@ -491,6 +491,7 @@ class RRTX:
                 or self.s_bot in list(zip(*self.Q))[1]):
 
             try:
+                heapq.heapify(self.Q)
                 v = heapq.heappop(self.Q)[1]
             except TypeError:
                 print('something went wrong with the queue')
