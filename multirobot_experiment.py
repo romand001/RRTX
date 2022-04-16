@@ -14,7 +14,7 @@ if __name__ == '__main__':
         'gamma_FOS': 10.0,
         'epsilon': 0.05,
         'bot_sample_rate': 0.10,
-        'planning_time': 5.0,
+        'starting_nodes': 1000,
     }
 
     top_left = (4, 4)
@@ -43,7 +43,7 @@ if __name__ == '__main__':
         gamma_FOS = rrt_params['gamma_FOS'],
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        planning_time = rrt_params['planning_time'],
+        starting_nodes = rrt_params['starting_nodes'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -66,7 +66,7 @@ if __name__ == '__main__':
         gamma_FOS = rrt_params['gamma_FOS'],
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        planning_time = rrt_params['planning_time'],
+        starting_nodes = rrt_params['starting_nodes'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -89,7 +89,7 @@ if __name__ == '__main__':
         gamma_FOS = rrt_params['gamma_FOS'],
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        planning_time = rrt_params['planning_time'],
+        starting_nodes = rrt_params['starting_nodes'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -112,7 +112,7 @@ if __name__ == '__main__':
         gamma_FOS = rrt_params['gamma_FOS'],
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        planning_time = rrt_params['planning_time'],
+        starting_nodes = rrt_params['starting_nodes'],
         multi_robot = True,
         plot_params = {
             'robot': True,

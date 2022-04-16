@@ -105,7 +105,7 @@ class Node(Sequence):
 class RRTX:
 
     def __init__(self, x_start, x_goal, robot_radius, step_len, move_dist, gamma_FOS, epsilon, 
-                 bot_sample_rate, planning_time, multi_robot=False, plot_params=None, iter_max=10_000):
+                 bot_sample_rate, starting_nodes, multi_robot=False, plot_params=None, iter_max=10_000):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal, lmc=0.0, cost_to_goal=0.0)
         self.s_bot = self.s_start
@@ -114,7 +114,7 @@ class RRTX:
         self.move_dist = move_dist
         self.epsilon = epsilon
         self.bot_sample_rate = bot_sample_rate
-        self.planning_time = planning_time
+        self.starting_nodes = starting_nodes
         self.plot_params = plot_params
         self.search_radius = 0.0
         self.kd_tree = kdtree.create([self.s_goal])
@@ -149,7 +149,6 @@ class RRTX:
         self.started = False
         self.path_to_goal = False
         self.reached_goal = False
-        self.start_time = time.time()
 
         # single robot stuff
         if not multi_robot:
@@ -259,7 +258,7 @@ class RRTX:
             return
 
         # check if planning time is over
-        if not self.started and time.time() - self.start_time > self.planning_time:
+        if not self.started and len(self.tree_nodes) > self.starting_nodes:
             self.started = True
         
         # if planning time is over and we have a path, we can move the robot
