@@ -105,7 +105,8 @@ class Node(Sequence):
 class RRTX:
 
     def __init__(self, x_start, x_goal, robot_radius, step_len, move_dist, gamma_FOS, epsilon, 
-                 bot_sample_rate, starting_nodes, multi_robot=False, plot_params=None, iter_max=10_000):
+                 bot_sample_rate, starting_nodes, node_limit=3000, multi_robot=False,
+                 iter_max=10_000, plot_params=None):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal, lmc=0.0, cost_to_goal=0.0)
         self.s_bot = self.s_start
@@ -115,6 +116,7 @@ class RRTX:
         self.epsilon = epsilon
         self.bot_sample_rate = bot_sample_rate
         self.starting_nodes = starting_nodes
+        self.node_limit = node_limit
         self.plot_params = plot_params
         self.search_radius = 0.0
         self.kd_tree = kdtree.create([self.s_goal])
@@ -268,11 +270,20 @@ class RRTX:
                 self.robot_position, self.s_bot, self.robot_speed, self.move_dist
             )
 
+        if self.s_bot.cost_to_goal < np.inf:
+            self.path_to_goal = True
+            if self.s_bot == self.s_goal:
+                self.reached_goal = True
+
         ''' MAIN ALGORITHM BEGINS '''
 
         self.search_radius = self.shrinking_ball_radius()
 
         self.update_robot_obstacles(delta=0.5) # update other robots as obstacles of this robot
+
+        # don't add nodes past limit unless there's currently no path
+        if len(self.tree_nodes) >= self.node_limit and self.path_to_goal:
+            return
 
         v = self.random_node()
         v_nearest = self.nearest(v)
@@ -283,11 +294,6 @@ class RRTX:
             if v.parent:
                 self.rewire_neighbours(v)
                 self.reduce_inconsistency()
-
-        if self.s_bot.cost_to_goal < np.inf:
-            self.path_to_goal = True
-            if self.s_bot == self.s_goal:
-                self.reached_goal = True
 
     def set_other_robots(self, other_robots):
         # set the other robots that this robot should know about, called by multirobot.py
@@ -424,9 +430,7 @@ class RRTX:
             if node.lmc != node.cost_to_goal:
                 self.verify_queue(node)
         heapq.heapify(self.Q)
-
-
-        
+ 
     def verify_orphan(self, v):
         # Algorithm 10
         # if v is in Q, remove it from Q and add it to orphan_nodes
@@ -600,6 +604,7 @@ class RRTX:
             return keys[idx]
         except ValueError:
             return None
+
     def find_obstacle(self, a , b):
         for (x, y, r) in self.obs_circle:
             if math.hypot(a - x, b - y) <= r:
@@ -608,6 +613,7 @@ class RRTX:
         for (x, y, w, h) in self.obs_rectangle:
             if 0 <= a - (x) <= w + 2 and 0 <= b - (y) <= h :
                 return ([x, y, w, h], 'rectangle')
+
     def find_nodes_in_range(self, pos, r):
         return self.kd_tree.search_nn_dist((pos[0], pos[1]), r)
 

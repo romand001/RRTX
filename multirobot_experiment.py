@@ -9,12 +9,13 @@ if __name__ == '__main__':
     rrt_params = {
         'iter_max': 100_000,
         'robot_radius': 0.5,
-        'step_len': 3.0,
-        'move_dist': 0.01, # must be < 0.05 bc that's used in update_robot_position()
-        'gamma_FOS': 10.0,
+        'step_len': 5.0,
+        'move_dist': 0.02, # must be < 0.05 bc that's used in update_robot_position()
+        'gamma_FOS': 5.0,
         'epsilon': 0.05,
         'bot_sample_rate': 0.10,
-        'starting_nodes': 1000,
+        'starting_nodes': 500,
+        'node_limit': 1000, # for each robot. after this, new nodes only added if robot gets orphaned
     }
 
     top_left = (4, 4)
@@ -44,6 +45,7 @@ if __name__ == '__main__':
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
+        node_limit = rrt_params['node_limit'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -67,6 +69,7 @@ if __name__ == '__main__':
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
+        node_limit = rrt_params['node_limit'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -90,6 +93,7 @@ if __name__ == '__main__':
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
+        node_limit = rrt_params['node_limit'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -113,6 +117,7 @@ if __name__ == '__main__':
         epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
+        node_limit = rrt_params['node_limit'],
         multi_robot = True,
         plot_params = {
             'robot': True,
@@ -158,4 +163,6 @@ if __name__ == '__main__':
                 mrh.single_bot_plot(ax, robot)
             fig.canvas.blit(ax.bbox)
             fig.canvas.flush_events()
+
+    print('\nRRTX complete!')
 
