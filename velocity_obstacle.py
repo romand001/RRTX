@@ -15,7 +15,8 @@ class Velocity_Obstacle:
         self.desired_vel = 0
         self.obstacle_robots = [[]]
         
-        self.obstacle_FOS = 0.1
+        self.obstacle_FOS = 0.5
+        self.obstacle_radius = 10
         
         self.env = env.Env()
         self.x_range = self.env.x_range
@@ -95,13 +96,14 @@ class Velocity_Obstacle:
         vA = self.robot_state[-2:]
         # Compute the constraints
         # for each velocity obstacles
-        number_of_obstacles = np.shape(self.obstacle_robots)[1] + np.shape(self.obs_circle)[0]
+        robot_obstacles, circle_obstacles = self.nearby_obstacles()
+        number_of_obstacles = len(robot_obstacles) + len(circle_obstacles)
         Amat = np.empty((number_of_obstacles * 2, 2))
         bvec = np.empty((number_of_obstacles * 2))
         
-        for i in range(np.shape(self.obstacle_robots)[1]):
+        for i in range(len(robot_obstacles)):
             # other robot obstacles
-            obstacle = self.obstacle_robots[:, i] # obstacle = [x , y, vx, vy]
+            obstacle = robot_obstacles[:, i] # obstacle = [x , y, vx, vy]
             pB = obstacle[:2]
             vB = obstacle[2:]
             dispBA = pA - pB 
@@ -122,17 +124,17 @@ class Velocity_Obstacle:
             Amat[i*2 + 1, :] = Atemp
             bvec[i*2 + 1] = btemp
         
-        for j in range(np.shape(self.obs_circle)[0]):
+        for j in range(len(circle_obstacles)):
             # circle obstacle
-            obstacle = self.obs_circle[j]
-            pB = obstacle[:2]
+            obstacle = circle_obstacles[j]
+            pB = np.array(obstacle[:2])
             vB = np.array([0,0]) # static obstacle
             dispBA = pA - pB # distance between robot and closest edge of obstacle
             distBA = np.linalg.norm(dispBA) - obstacle[2] # displacement vector between robot and obstacle
             thetaBA = np.arctan2(dispBA[1], dispBA[0])
-            if 2*(self.robot_radius + self.obstacle_FOS) * self.robot_radius > distBA: # if robot is close enough to obstacle
-                distBA = 2*(self.robot_radius + self.obstacle_FOS)*self.robot_radius
-            phi_obst = np.arcsin(2.2*self.robot_radius/distBA)
+            if (2*self.robot_radius + self.obstacle_FOS) * self.robot_radius > distBA: # if robot is close enough to obstacle
+                distBA = (2*self.robot_radius + self.obstacle_FOS)*self.robot_radius
+            phi_obst = np.arcsin((2*self.robot_radius + self.obstacle_FOS)*self.robot_radius/distBA)
             phi_left = thetaBA + phi_obst
             phi_right = thetaBA - phi_obst
 
@@ -206,6 +208,18 @@ class Velocity_Obstacle:
         new_state[-2:] = self.cmd_vel
         self.robot_state = new_state
     
+    def nearby_obstacles(self):
+        # Finds obstacles within a certain radius of the robot
+        # Returns a list of obstacles
+        robot_obstacles = []
+        circle_obstacles = []
+        for i in range(np.shape(self.obstacle_robots)[1]):
+            if np.linalg.norm(self.obstacle_robots[:2,i] - self.robot_state[:2]) < self.obstacle_radius:
+                robot_obstacles.append(self.obstacle_robots[:,i])
+        for i in range(np.shape(self.obs_circle)[0]):
+            if np.linalg.norm(self.obs_circle[i][:2] - self.robot_state[:2]) < self.obstacle_radius:
+                circle_obstacles.append(self.obs_circle[i])
+        return robot_obstacles, circle_obstacles
         
 if __name__ == "__main__":
     start = (36,30)
