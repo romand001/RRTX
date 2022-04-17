@@ -13,7 +13,8 @@ if __name__ == '__main__':
         'move_dist': 0.01, # must be < 0.05 bc that's used in update_robot_position()
         'gamma_FOS': 5.0,
         'epsilon': 0.05,
-        'bot_sample_rate': 0.10,
+        'bot_sample_rate': 0.1,
+        'waypoint_sample_rate': 0.5,
         'starting_nodes': 500,
         'node_limit': 5000, # for each robot. after this, new nodes only added if robot gets orphaned
     }
@@ -42,6 +43,7 @@ if __name__ == '__main__':
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
+        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
@@ -64,6 +66,7 @@ if __name__ == '__main__':
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
+        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
@@ -86,6 +89,7 @@ if __name__ == '__main__':
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
+        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
@@ -108,6 +112,7 @@ if __name__ == '__main__':
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
+        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,

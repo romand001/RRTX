@@ -54,8 +54,8 @@ class Node(Sequence):
 class DRRT:
 
     def __init__(self, x_start, x_goal, robot_radius, step_len, move_dist, 
-                 bot_sample_rate, starting_nodes, node_limit=3000, multi_robot=False, 
-                 iter_max=10_000, plot_params=None):
+                 bot_sample_rate, waypoint_sample_rate, starting_nodes, node_limit=3000, 
+                 multi_robot=False, iter_max=10_000, plot_params=None):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal)
         self.s_bot = self.s_start
@@ -63,12 +63,14 @@ class DRRT:
         self.step_len = step_len
         self.move_dist = move_dist
         self.bot_sample_rate = bot_sample_rate
+        self.waypoint_sample_rate = waypoint_sample_rate
         self.starting_nodes = starting_nodes
         self.node_limit = node_limit
         self.plot_params = plot_params
         self.kd_tree = kdtree.create([self.s_goal])
         sys.setrecursionlimit(3000) # for the kd-tree cus it searches recursively
         self.tree_nodes = set([self.s_goal])
+        self.waypoints = []
         self.robot_position = [self.s_bot.x, self.s_bot.y]
         self.robot_speed = 1.0 # m/s
         self.path = []
@@ -89,6 +91,7 @@ class DRRT:
         self.started = False
         self.path_to_goal = False
         self.reached_goal = False
+        self.regrowing = False
 
         # single robot stuff
         if not multi_robot:
@@ -134,7 +137,13 @@ class DRRT:
         if len(self.tree_nodes) >= self.node_limit and self.path_to_goal:
             return
 
+        if self.regrowing:
+            v = self.random_node_regrow()
+        else:
+            v = self.random_node()
+
         v = self.random_node()
+
         v_nearest = self.nearest(v)
         v = self.saturate(v_nearest, v)
 
@@ -209,6 +218,7 @@ class DRRT:
             node = q.pop()
             if node == self.s_bot:
                 self.path_to_goal = False
+                self.regrowing = True
             for child in node.children:
                 q.appendleft(child)
             try:
@@ -235,10 +245,23 @@ class DRRT:
         delta = self.utils.delta
 
         if not self.path_to_goal and np.random.random() < self.bot_sample_rate:
-            return Node((self.s_bot.x, self.s_bot.y))
+            return Node(self.s_bot.n)
 
         return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
                      np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
+
+    def random_node_regrow(self):
+        delta = self.utils.delta
+        p = np.random.random()
+
+        if not self.path_to_goal and p < self.bot_sample_rate:
+            return Node(self.s_bot.n)
+        elif self.waypoints and self.bot_sample_rate < p < self.bot_sample_rate + self.waypoint_sample_rate:
+            waypoint = self.waypoints[np.random.randint(0, len(self.waypoints) - 1)]
+            return Node(waypoint.n)
+        else:
+            return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
+                         np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
 
     def add_node(self, node_new):
         self.tree_nodes.add(node_new)
@@ -247,6 +270,7 @@ class DRRT:
         if node_new == self.s_bot:
             self.s_bot = node_new
             self.path_to_goal = True
+            self.regrowing = False
             self.update_path(self.s_bot) # update path to goal for plotting
 
     def saturate(self, v_nearest, v):
@@ -267,8 +291,10 @@ class DRRT:
 
     def update_path(self, node):
         self.path = []
+        self.waypoints = []
         while node.parent:
             self.path.append(np.array([[node.x, node.y], [node.parent.x, node.parent.y]]))
+            self.waypoints.append(node)
             node = node.parent
     
     def find_obstacle(self, a, b):
