@@ -169,91 +169,6 @@ class RRTX:
             # other
             self.iter_max = iter_max
 
-    def planning(self):
-
-        # set seed for reproducibility
-        np.random.seed(0)
-
-        # set up event handling
-        self.fig.canvas.mpl_connect('button_press_event', self.update_click_obstacles)
-
-        # animation stuff
-        plt.gca().set_aspect('equal', adjustable='box')
-        self.edge_col.set_animated(True)
-        self.path_col.set_animated(True)
-        plt.show(block=False)
-        plt.pause(0.1)
-        self.ax.draw_artist(self.edge_col)
-        self.fig.canvas.blit(self.ax.bbox)
-        start_time = time.time()
-        prev_plotting = time.time()
-        first_time = True
-
-        for i in range(self.iter_max):
-
-            # update robot position
-            run_time = time.time() - start_time
-            if self.path_to_goal and run_time > 5:
-                # timing stuff
-                if first_time:
-                    prev_time = time.time()
-                    first_time = False
-                elapsed_time = time.time() - prev_time
-                prev_time = time.time()
-
-                # update robot position and maybe the node it is at
-                self.s_bot, self.robot_position = self.utils.update_robot_position(
-                    self.robot_position, self.s_bot, 
-                    self.robot_speed, 0.01)
-
-            # animate
-            if run_time > 5 or run_time < 0.01:
-
-                # only update the plot at 5 Hz
-                elapsed_plotting = time.time() - prev_plotting
-                if elapsed_plotting >= 0.2:
-                    prev_plotting = time.time()
-                    self.edges = []
-                    for node in self.tree_nodes:
-                        if node.parent:
-                            self.edges.append(np.array([[node.parent.x, node.parent.y], [node.x, node.y]]))
-
-                    self.fig.canvas.restore_region(self.bg)
-
-                    # all nodes
-                    self.nodes_scatter.set_offsets(np.array(self.all_nodes_coor))
-                    self.ax.draw_artist(self.nodes_scatter)
-
-                    # tree edges
-                    self.edge_col.set_segments(np.array(self.edges))
-                    self.ax.draw_artist(self.edge_col)
-
-                    # path to goal edges
-                    self.path_col.set_segments(np.array(self.path))
-                    self.ax.draw_artist(self.path_col)
-                    
-                    # obstacles and robot
-                    self.plotting.plot_env(self.ax)
-                    self.plotting.plot_robot(self.ax, self.robot_position, self.robot_radius)
-
-                    self.fig.canvas.blit(self.ax.bbox)
-                    self.fig.canvas.flush_events()
-
-            self.search_radius = self.shrinking_ball_radius()
-
-            v = self.random_node()
-            v_nearest = self.nearest(v)
-            v = self.saturate(v_nearest, v)
-
-            if v and not self.utils.is_collision(v_nearest, v):
-                self.extend(v, v_nearest)
-                if v.parent:
-                    self.rewire_neighbours(v)
-                    self.reduce_inconsistency()
-
-            if self.s_bot.cost_to_goal < np.inf:
-                self.path_to_goal = True
-
     def step(self):
         # if we reached the goal, just return
         if self.reached_goal:
@@ -389,9 +304,12 @@ class RRTX:
         self.update_gamma() # free space volume changed, so gamma must change too
 
         # get all edges that intersect the new circle obstacle
-        nearby_nodes = self.find_nodes_in_range((x, y), r + self.step_len)
+        nearby_nodes = self.find_nodes_in_range((x, y), r + self.step_len + self.utils.delta)
         E_O = [(v, u) for v in nearby_nodes for u in v.all_out_neighbors() 
                if self.utils.is_intersect_circle(u.n, v.n, (x, y), r)]
+        if not E_O:
+            return
+
         for v, u in E_O:
             v.infinite_dist_nodes.add(u)
             u.infinite_dist_nodes.add(v)
@@ -527,7 +445,6 @@ class RRTX:
 
     def find_parent(self, v, U):
         # Algorithm 6
-        # skip collision check because it is done in "near()"
         costs = [math.sqrt((v.x - u.x)**2 + (v.y - u.y)**2) + u.lmc for u in U]
         if not costs:
             return
@@ -535,7 +452,7 @@ class RRTX:
         best_u = U[min_idx]
         if not self.utils.is_collision(best_u, v):
             v.set_parent(best_u)
-            v.lmc = costs[min_idx] + best_u.lmc
+            v.lmc = costs[min_idx]
         else:
             del U[min_idx]
             self.find_parent(v, U)
@@ -628,25 +545,3 @@ class RRTX:
         dx = node_end.x - node_start.x
         dy = node_end.y - node_start.y
         return math.hypot(dx, dy)
-
-def main():
-    x_start = (18, 8)  # Starting node
-    x_goal = (37, 18)  # Goal node
-
-
-    rrtx = RRTX(
-        x_start=x_start, 
-        x_goal=x_goal, 
-        robot_radius=0.5,
-        step_len=3.0, 
-        move_dist=0.01,
-        gamma_FOS = 100.0,
-        epsilon=0.05,
-        bot_sample_rate=0.10,
-        planning_time=5.0,
-        iter_max=10_000)
-    rrtx.planning()
-
-
-if __name__ == '__main__':
-    main()

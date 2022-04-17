@@ -14,10 +14,11 @@ import env, plotting, utils, queue
 
 class Node(Sequence):
     # inherits from Sequence to support indexing and thus kd-tree support
-    def __init__(self, n):
+    def __init__(self, n, cost_to_goal=np.inf):
         self.n = n # make iterable for kd-tree insertion
         self.x = n[0]
         self.y = n[1]
+        self.cost_to_goal = cost_to_goal
         self.parent = None
         self.children = set([])
 
@@ -38,22 +39,27 @@ class Node(Sequence):
    
     def set_parent(self, new_parent):
         # if a parent exists already
-        # if self.parent:
-        #     self.parent.children.remove(self)
+        if self.parent:
+            self.parent.children.remove(self)
         self.parent = new_parent
         new_parent.children.add(self)
 
     def distance(self, other):
         return math.hypot(self.x - other.x, self.y - other.y)
 
+    def update_costs_recursive(self):
+        # update cost-to-goal of all children recursively
+        self.cost_to_goal = self.parent.cost_to_goal + self.distance(self.parent)
+        for child in self.children:
+            child.update_costs_recursive()
 
-class DRRT:
+class DRRTStar:
 
-    def __init__(self, x_start, x_goal, robot_radius, step_len, move_dist, 
+    def __init__(self, x_start, x_goal, robot_radius, step_len, move_dist, gamma_FOS, 
                  bot_sample_rate, waypoint_sample_rate, starting_nodes, node_limit=3000, 
                  multi_robot=False, iter_max=10_000, plot_params=None):
         self.s_start = Node(x_start)
-        self.s_goal = Node(x_goal)
+        self.s_goal = Node(x_goal, cost_to_goal=0.0)
         self.s_bot = self.s_start
         self.robot_radius = robot_radius
         self.step_len = step_len
@@ -83,6 +89,13 @@ class DRRT:
         self.obs_rectangle = self.env.obs_rectangle
         self.obs_boundary = self.env.obs_boundary
         self.obs_robot = []
+
+        # for gamma computation
+        self.d = 2 # dimension of the state space
+        self.zeta_d = np.pi # volume of the unit d-ball in the d-dimensional Euclidean space
+        self.gamma_FOS = gamma_FOS # factor of safety so that gamma > expression from Theorem 38 of RRT* paper
+        self.update_gamma() # initialize gamma
+        self.search_radius = 0.0 # initialization
 
         self.started = False
         self.path_to_goal = False
@@ -127,6 +140,8 @@ class DRRT:
 
         ''' MAIN ALGORITHM BEGINS '''
 
+        self.search_radius = self.shrinking_ball_radius()
+
         self.update_robot_obstacles(delta=0.5) # update other robots as obstacles of this robot
 
         # don't add nodes past limit unless there's currently no path
@@ -142,7 +157,10 @@ class DRRT:
         v = self.saturate(v_nearest, v)
 
         if v and not self.utils.is_collision(v_nearest, v):
-            self.extend(v, v_nearest)
+            V_near = self.near(v)
+            self.extend(v, V_near, v_nearest)
+            if v.parent:
+                self.rewire(v, V_near)
 
     def set_other_robots(self, other_robots):
         # set the other robots that this robot should know about, called by multirobot.py
@@ -155,10 +173,37 @@ class DRRT:
                     robot.robot_radius
             ])
 
-    def extend(self, v, v_nearest):
-        v.set_parent(v_nearest)
+    def extend(self, v, V_near, v_nearest):
+        if not V_near:
+            V_near.append(v_nearest)
+        self.find_parent(v, V_near)
+        if not v.parent:
+            return
         self.add_node(v)
-                
+        v.update_costs_recursive()
+
+    def find_parent(self, v, U):
+        costs = [v.distance(u) + u.cost_to_goal for u in U]
+        if costs:
+            min_idx = int(np.argmin(costs))
+            best_u = U[min_idx]
+            if not self.utils.is_collision(best_u, v):
+                v.set_parent(best_u)
+                v.cost_to_goal = costs[min_idx]
+            else:
+                del U[min_idx]
+                self.find_parent(v, U)
+
+    def rewire(self, v, V_near):
+        for u in V_near:
+            if u == v.parent or self.utils.is_collision(u, v):
+                continue
+            new_cost = v.cost_to_goal + v.distance(u)
+            if new_cost < u.cost_to_goal:
+                u.set_parent(v)
+                u.cost_to_goal = new_cost
+                u.update_costs_recursive()
+
     def update_click_obstacles(self, event):
         if event.button == 1: # add obstacle
             x, y = int(event.xdata), int(event.ydata)
@@ -202,16 +247,11 @@ class DRRT:
         else:
             self.obs_robot.append(obs)
 
+        self.update_gamma() # free space volume changed, so gamma must change too
+
         # get possible affected edges to check for collision with new obstacle
         nearby_nodes = self.find_nodes_in_range((x, y), r + self.step_len + self.utils.delta)
         E = [u for u in nearby_nodes if u.parent and self.utils.is_intersect_circle(u.n, u.parent.n, [x, y], r)]
-
-        if not E:
-            return
-
-        # remove these nodes as their parents' children
-        for u in E:
-            u.parent.children.remove(u)
 
         # remove children from tree recursively
         q = deque(E)
@@ -222,18 +262,17 @@ class DRRT:
                 self.regrowing = True
             for child in node.children:
                 q.appendleft(child)
-            try:
+
+            if node in self.tree_nodes:
                 self.tree_nodes.remove(node)
                 self.kd_tree.remove(node)
-            except KeyError:
-                pass
 
         # update waypoints
         self.waypoints = []
         for edge in self.path:
             pos = tuple(edge[0,:])
             node = Node(pos)
-            if not node in self.tree_nodes:
+            if node not in self.tree_nodes:
                 self.waypoints.append(pos)
             else:
                 break
@@ -251,6 +290,8 @@ class DRRT:
             self.obs_rectangle.remove(obs)
             self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
             self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking
+
+        self.update_gamma() # free space volume changed, so gamma must change too
 
     def random_node(self):
         delta = self.utils.delta
@@ -299,6 +340,26 @@ class DRRT:
 
     def find_nodes_in_range(self, pos, r):
         return self.kd_tree.search_nn_dist((pos[0], pos[1]), r)
+
+    def update_gamma(self):
+        '''
+        computes and updates gamma required for shrinking ball radius
+        - gamma depends on the free space volume, so changes when obstacles are added or removed
+        - this assumes that obstacles don't overlap
+        '''
+        mu_X_free = (self.x_range[1] - self.x_range[0]) * (self.y_range[1] - self.y_range[0])
+        for (_, _, r) in self.obs_circle:
+            mu_X_free -= np.pi * r ** 2
+        for (_, _, w, h) in self.obs_rectangle:
+            mu_X_free -= w * h
+
+        self.gamma = self.gamma_FOS * (2 * (1 + 1/self.d))**(1/self.d) * (mu_X_free/self.zeta_d)**(1/self.d) # optimality condition from Theorem 38 of RRT* paper
+
+    def shrinking_ball_radius(self):
+        '''
+        Computes and returns the radius for the shrinking ball
+        '''
+        return min(self.step_len, self.gamma * np.log(len(self.tree_nodes)+1) / len(self.tree_nodes))
 
     def update_path(self, node):
         self.path = []
