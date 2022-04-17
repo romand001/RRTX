@@ -66,8 +66,9 @@ class Utils:
     def is_intersect_circle(self, ln1, ln2, a, r):
 
         # fast preliminary check
-        if math.hypot(a[0] - ln2[0], a[1] - ln2[1]) > r + self.delta or \
-                math.hypot(a[0] - ln1[0], a[1] - ln1[1]) > r + self.delta:
+        unsafe_dist = r + math.hypot(ln1[0] - ln2[0], ln1[1] - ln2[1]) + self.delta
+        if math.hypot(a[0] - ln2[0], a[1] - ln2[1]) > unsafe_dist or \
+                math.hypot(a[0] - ln1[0], a[1] - ln1[1]) > unsafe_dist:
             return False
 
         p = Point(*a)
