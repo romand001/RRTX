@@ -389,9 +389,9 @@ class RRTX:
         self.update_gamma() # free space volume changed, so gamma must change too
 
         # get all edges that intersect the new circle obstacle
-        # E_O = [(v, u) for v in self.tree_nodes if (u:=v.parent) and self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
-        E_O = [(v, u) for v in self.tree_nodes for u in v.all_out_neighbors() 
-               if self.utils.is_intersect_circle(*self.utils.get_ray(v, u), obs[:2], obs[2])]
+        nearby_nodes = self.find_nodes_in_range((x, y), r + self.step_len)
+        E_O = [(v, u) for v in nearby_nodes for u in v.all_out_neighbors() 
+               if self.utils.is_intersect_circle(u.n, v.n, (x, y), r)]
         for v, u in E_O:
             v.infinite_dist_nodes.add(u)
             u.infinite_dist_nodes.add(v)

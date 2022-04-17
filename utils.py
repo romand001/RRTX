@@ -1,12 +1,9 @@
-"""
-utils for collision check
-@author: huiming zhou
-"""
-
 import math
 import numpy as np
 import os
 import sys
+from shapely.geometry import LineString
+from shapely.geometry import Point
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) +
                 "/../../Sampling_based_Planning/")
@@ -66,23 +63,17 @@ class Utils:
 
         return False
 
-    def is_intersect_circle(self, o, d, a, r):
-        d2 = np.dot(d, d)
-        delta = self.delta
+    def is_intersect_circle(self, ln1, ln2, a, r):
 
-        if d2 == 0:
+        # fast preliminary check
+        if math.hypot(a[0] - ln2[0], a[1] - ln2[1]) > r + self.delta or \
+                math.hypot(a[0] - ln1[0], a[1] - ln1[1]) > r + self.delta:
             return False
 
-        t = np.dot([a[0] - o[0], a[1] - o[1]], d) / d2
-
-        if 0 <= t <= 1:
-            # shot = Node((o[0] + t * d[0], o[1] + t * d[1]))
-            # if self.get_dist(shot, Node(a)) <= r + delta:
-            if math.hypot(a[0] - (o[0] + t * d[0]), 
-                          a[1] - (o[1] + t * d[1])) <= r + delta:
-                return True
-
-        return False
+        p = Point(*a)
+        c = p.buffer(r).boundary
+        l = LineString([ln1, ln2])
+        return c.intersects(l)
 
     def is_collision(self, start, end):
         if self.is_inside_obs(start) or self.is_inside_obs(end):
@@ -102,7 +93,7 @@ class Utils:
                 return True
 
         for (x, y, r) in self.obs_circle:
-            if self.is_intersect_circle(o, d, [x, y], r):
+            if self.is_intersect_circle(start, end, [x, y], r):
                 return True
 
         return False

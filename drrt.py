@@ -2,7 +2,7 @@ import os
 import sys
 import time
 import math
-import heapq
+# import queue
 from collections import deque
 from collections.abc import Sequence
 import kdtree
@@ -20,14 +20,13 @@ class Node(Sequence):
         self.y = n[1]
         self.parent = None
         self.children = set([])
-        self.cost_to_goal = np.inf
 
     def __eq__(self, other):
-        return math.hypot(self.x - other.x, self.y - other.y) < 1e-6
+        return id(self) == id(other) or math.hypot(self.x - other.x, self.y - other.y) < 1e-6
 
-    def __lt__(self, other):
-        # this is just in case their keys are the same, so a ValueError is not thrown
-        return 1
+    # def __lt__(self, other):
+    #     # this is just in case their keys are the same, so a ValueError is not thrown
+    #     return 1
 
     def __hash__(self):
         # this is required for storing Nodes to sets
@@ -43,8 +42,8 @@ class Node(Sequence):
    
     def set_parent(self, new_parent):
         # if a parent exists already
-        if self.parent:
-            self.parent.children.remove(self)
+        # if self.parent:
+        #     self.parent.children.remove(self)
         self.parent = new_parent
         new_parent.children.add(self)
 
@@ -69,7 +68,6 @@ class DRRT:
         self.plot_params = plot_params
         self.kd_tree = kdtree.create([self.s_goal])
         sys.setrecursionlimit(3000) # for the kd-tree cus it searches recursively
-        self.all_nodes_coor = []
         self.tree_nodes = set([self.s_goal])
         self.robot_position = [self.s_bot.x, self.s_bot.y]
         self.robot_speed = 1.0 # m/s
@@ -125,10 +123,8 @@ class DRRT:
                 self.robot_position, self.s_bot, self.robot_speed, self.move_dist
             )
 
-        if self.s_bot.cost_to_goal < np.inf:
-            self.path_to_goal = True
-            if self.s_bot == self.s_goal:
-                self.reached_goal = True
+        if self.s_bot == self.s_goal:
+            self.reached_goal = True
 
         ''' MAIN ALGORITHM BEGINS '''
 
@@ -157,14 +153,7 @@ class DRRT:
             ])
 
     def extend(self, v, v_nearest):
-        # V_near = self.near(v)
-        # if not V_near:
-        #     V_near.append(v_nearest)
-
-        # self.find_parent(v, V_near)
-        self.find_parent(v, self.tree_nodes)
-        if not v.parent:
-            return
+        v.set_parent(v_nearest)
         self.add_node(v)
                 
     def update_click_obstacles(self, event):
@@ -212,17 +201,21 @@ class DRRT:
 
         # get possible affected edges to check for collision with new obstacle
         nearby_nodes = self.find_nodes_in_range((x, y), r + self.step_len)
-        E = [(u, v) for u in nearby_nodes for v in u.children
-             if self.utils.is_intersect_circle(*self.utils.get_ray(u, v), obs[:2], obs[2])]
+        E = [u for u in nearby_nodes if u.parent and self.utils.is_intersect_circle(u.n, u.parent.n, [x, y], r)]
 
         # remove children from tree recursively
-        queue = deque(list(zip(*E))[1])
-        while queue:
-            node = queue.pop()
+        q = deque(E)
+        while q:
+            node = q.pop()
+            if node == self.s_bot:
+                self.path_to_goal = False
             for child in node.children:
-                queue.append(child)
-            self.tree_nodes.remove(node)
-            self.kd_tree.remove(node)
+                q.appendleft(child)
+            try:
+                self.tree_nodes.remove(node)
+                self.kd_tree.remove(node)
+            except KeyError:
+                pass
                 
     def remove_obstacle(self, obs, shape):
         if self.obs_robot:
@@ -237,9 +230,17 @@ class DRRT:
             self.obs_rectangle.remove(obs)
             self.plotting.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for plotting obstacles
             self.utils.update_obs(self.obs_circle, self.obs_boundary, self.obs_rectangle) # for collision checking
- 
+
+    def random_node(self):
+        delta = self.utils.delta
+
+        if not self.path_to_goal and np.random.random() < self.bot_sample_rate:
+            return Node((self.s_bot.x, self.s_bot.y))
+
+        return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
+                     np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
+
     def add_node(self, node_new):
-        self.all_nodes_coor.append(np.array([node_new.x, node_new.y])) # for plotting
         self.tree_nodes.add(node_new)
         self.kd_tree.add(node_new)
         # if new node is at start, then path to goal is found
@@ -255,34 +256,14 @@ class DRRT:
                          v_nearest.y + dist * math.sin(theta)))
         return node_new
 
-    def find_parent(self, v, U):
-        U = list(U)
-        costs = [math.hypot(v.x - u.x, v.y - u.y) + u.cost_to_goal for u in U]
-        if not costs:
-            return
-        min_idx = int(np.argmin(costs))
-        best_u = U[min_idx]
-        if not self.utils.is_collision(best_u, v):
-            v.set_parent(best_u)
-            v.cost_to_go = costs[min_idx]
-        else:
-            del U[min_idx]
-            self.find_parent(v, U)
-        
-    def random_node(self):
-        delta = self.utils.delta
-
-        if not self.path_to_goal and np.random.random() < self.bot_sample_rate:
-            return Node((self.s_bot.x, self.s_bot.y))
-
-        return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
-                     np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
-
     def near(self, v):
         return self.kd_tree.search_nn_dist((v.x, v.y), self.search_radius)
 
     def nearest(self, v):
         return self.kd_tree.search_nn((v.x, v.y))[0].data
+
+    def find_nodes_in_range(self, pos, r):
+        return self.kd_tree.search_nn_dist((pos[0], pos[1]), r)
 
     def update_path(self, node):
         self.path = []
@@ -298,9 +279,6 @@ class DRRT:
         for (x, y, w, h) in self.obs_rectangle:
             if 0 <= a - (x) <= w + 2 and 0 <= b - (y) <= h :
                 return ([x, y, w, h], 'rectangle')
-
-    def find_nodes_in_range(self, pos, r):
-        return self.kd_tree.search_nn_dist((pos[0], pos[1]), r)
 
     @staticmethod
     def get_distance_and_angle(node_start, node_end):
