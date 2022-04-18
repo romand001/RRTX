@@ -58,7 +58,7 @@ def run_simulation(exp_idx, agent_getter):
     # return stats
     return {
         'time': time.time() - start_time,
-        'average_path_length': sum([robot.distance_travelled for robot in robots]) / len(robots)
+        'path_lengths': [robot.distance_travelled for robot in robots]
     }
 
 
@@ -72,9 +72,9 @@ if __name__ == '__main__':
             True  # Velocity Obstacle
         ],
         'num_sim': [
-            100, # RRTX
-            100, # DRRT
-            100, # DRRT*
+            5, # RRTX
+            5, # DRRT
+            5, # DRRT*
             1   # Velocity Obstacle
         ]
     }
@@ -90,8 +90,10 @@ if __name__ == '__main__':
     for algo_name in algo_names:
         data[algo_name] = {
             'time': [],
-            'average_path_length': []
+            'path_lengths': []
         }
+
+    experiment_start_time = time.time()
 
     # iterate over algorithm type
     for exp_idx in range(len(experiment_settings['toggles'])):
@@ -101,7 +103,7 @@ if __name__ == '__main__':
 
             print(f'Running {experiment_settings["num_sim"][exp_idx]} {algo_names[exp_idx]} Simulations')
 
-            out = Parallel(n_jobs=multiprocessing.cpu_count()//2)(delayed(run_simulation)
+            out = Parallel(n_jobs=multiprocessing.cpu_count()-2)(delayed(run_simulation)
                 (
                     exp_idx,
                     agent_getters[exp_idx]
@@ -110,24 +112,9 @@ if __name__ == '__main__':
             # add data to dict
             for result in out:
                 data[algo_names[exp_idx]]['time'].append(result['time'])
-                data[algo_names[exp_idx]]['average_path_length'].append(result['average_path_length'])
+                data[algo_names[exp_idx]]['path_lengths'].append(result['path_lengths'])
 
+    print(f'Experiment took {time.time() - experiment_start_time} seconds')
+    print(f'Saving data to pickle file')
     pkl.dump(data, open(f'experiment_data_{time.strftime("%Y%m%d-%H%M%S")}.pkl', 'wb'))
-
-    # calculate statistics
-    for algo_idx, algo_name in enumerate(algo_names):
-        mean_times = []
-        mean_path_lengths = []
-
-        mean_time = sum(data[algo_name]['time']) / len(data[algo_name]['time'])
-        mean_path_length = sum(data[algo_name]['average_path_length']) / len(data[algo_name]['average_path_length'])
-        mean_times.append(mean_time)
-        mean_path_lengths.append(mean_path_length)
-
-        print(f'{algo_name}: Average Time: {mean_time:.2f}s, Average Path Length: {mean_path_length:.2f}m')
-
-
-            
-
-
 
