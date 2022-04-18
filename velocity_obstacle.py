@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import env, plotting
 
 class Velocity_Obstacle:
-    def __init__(self, start, goal, robot_radius, timestep, iter_max):
+    def __init__(self, start, goal, robot_radius, timestep, iter_max, plot_params = None):
         self.start = np.append(np.array(start), [0, 0]) # x, y, velx, vely
         self.goal = np.append(np.array(goal), [0, 0])
         self.robot_radius = robot_radius
@@ -14,9 +14,15 @@ class Velocity_Obstacle:
         self.vmax = 0.2
         self.desired_vel = 0
         self.obstacle_robots = [[]]
+        self.plot_params = plot_params
+        self.robot_position = self.robot_state[:2]
+        self.obs_robot = []
         
-        self.obstacle_FOS = 0.5
-        self.obstacle_radius = 10
+        
+        self.obstacle_FOS = 1
+        self.robot_FOS = 5
+        self.obstacle_radius = 10 # how close robot needs to be to see obstacle
+                                  # if it sees too many obstacles, it gets deadlocked easily
         
         self.env = env.Env()
         self.x_range = self.env.x_range
@@ -35,12 +41,15 @@ class Velocity_Obstacle:
             
     
     def update_other_robots(self):
-        for idx,robot in self.other_robots:
+        self.obs_robot = []
+        for idx, robot in enumerate(self.other_robots):
             self.obstacle_robots[idx] = robot.robot_state
+            self.obs_robot.append( list(np.append(robot.robot_state[:2], robot.robot_radius)))
+            
     
     def step(self):
         # if reached goal, stop and return
-        if self.robot_state[0] - self.goal[0] < 0.01 and self.robot_state[1] - self.goal[1] < 0.01:
+        if (abs(self.robot_state[0] - self.goal[0]) < 0.01) and (abs(self.robot_state[1] - self.goal[1]) < 0.01):
             return
         
         self.update_other_robots()
@@ -48,7 +57,7 @@ class Velocity_Obstacle:
         self.compute_desired_velocity() # find straight line to goal velocity
         self.compute_velocity() # find velocity that satisfies obstacle constraints and is closest to desired velocity
         self.update_state() # update robot state
-        
+        self.robot_position = self.robot_state[:2] # add this so multirobot helper functions can be used
     
     def single_robot_simulation(self):
         # start with plotting stuff
@@ -103,15 +112,15 @@ class Velocity_Obstacle:
         
         for i in range(len(robot_obstacles)):
             # other robot obstacles
-            obstacle = robot_obstacles[:, i] # obstacle = [x , y, vx, vy]
+            obstacle = robot_obstacles[i] # obstacle = [x , y, vx, vy]
             pB = obstacle[:2]
             vB = obstacle[2:]
             dispBA = pA - pB 
             distBA = np.linalg.norm(dispBA) # displacement vector between robot and obstacle
             thetaBA = np.arctan2(dispBA[1], dispBA[0])
-            if 2*(self.robot_radius + self.obstacle_FOS) * self.robot_radius > distBA: # if robot is close enough to obstacle
-                distBA = 2*(self.robot_radius + self.obstacle_FOS)*self.robot_radius
-            phi_obst = np.arcsin(2.2*self.robot_radius/distBA)
+            if (2*self.robot_radius + self.robot_FOS) * self.robot_radius > distBA: # if robot is close enough to obstacle
+                distBA = (2*self.robot_radius + self.robot_FOS)*self.robot_radius
+            phi_obst = np.arcsin((2*self.robot_radius + self.robot_FOS)*self.robot_radius/distBA)
             phi_left = thetaBA + phi_obst
             phi_right = thetaBA - phi_obst
 
@@ -139,7 +148,7 @@ class Velocity_Obstacle:
             phi_right = thetaBA - phi_obst
 
             # VO
-            i = j + np.shape(self.obstacle_robots)[1]
+            i = j + len(robot_obstacles)
             translation = vB
             Atemp, btemp = self.create_constraints(translation, phi_left, "left")
             Amat[i*2, :] = Atemp
@@ -162,18 +171,25 @@ class Velocity_Obstacle:
         v_satisfying_constraints = self.check_constraints(v_sample, Amat, bvec)
 
         # Objective function
-        size = np.shape(v_satisfying_constraints)[1]
-        diffs = v_satisfying_constraints - \
-            ((self.desired_vel).reshape(2, 1) @ np.ones(size).reshape(1, size))
-        norm = np.linalg.norm(diffs, axis=0)
-        min_index = np.where(norm == np.amin(norm))[0][0]
-        self.cmd_vel = (v_satisfying_constraints[:, min_index])
+        if np.any(v_satisfying_constraints):
+            size = np.shape(v_satisfying_constraints)[1]
+            diffs = v_satisfying_constraints - \
+                ((self.desired_vel).reshape(2, 1) @ np.ones(size).reshape(1, size))
+            norm = np.linalg.norm(diffs, axis=0)
+            min_index = np.where(norm == np.amin(norm))[0][0]
+            self.cmd_vel = (v_satisfying_constraints[:, min_index])
+        else:
+            self.cmd_vel = np.zeros(2)
         
     def check_constraints(self, v_sample, Amat, bvec):
         length = np.shape(bvec)[0]
 
         for i in range(int(length/2)):
-            v_sample = self.check_inside(v_sample, Amat[2*i:2*i+2, :], bvec[2*i:2*i+2])
+            if np.any(v_sample):
+                v_sample = self.check_inside(v_sample, Amat[2*i:2*i+2, :], bvec[2*i:2*i+2])
+            else:
+                print('No feasible velocity found')
+                return
 
         return v_sample
     
@@ -213,16 +229,19 @@ class Velocity_Obstacle:
         # Returns a list of obstacles
         robot_obstacles = []
         circle_obstacles = []
-        for i in range(np.shape(self.obstacle_robots)[1]):
-            if np.linalg.norm(self.obstacle_robots[:2,i] - self.robot_state[:2]) < self.obstacle_radius:
-                robot_obstacles.append(self.obstacle_robots[:,i])
-        for i in range(np.shape(self.obs_circle)[0]):
+        for i in range(len(self.obstacle_robots)):
+            if np.linalg.norm(self.obstacle_robots[i][:2] - self.robot_state[:2]) < self.obstacle_radius:
+                robot_obstacles.append(self.obstacle_robots[i])
+        for i in range(len(self.obs_circle)):
             if np.linalg.norm(self.obs_circle[i][:2] - self.robot_state[:2]) < self.obstacle_radius:
                 circle_obstacles.append(self.obs_circle[i])
         return robot_obstacles, circle_obstacles
         
 if __name__ == "__main__":
-    start = (36,30)
-    goal = (37,18)
-    vel_obs = Velocity_Obstacle(start, goal, robot_radius = 0.5, timestep = 1, iter_max=10000)
-    vel_obs.single_robot_simulation()
+    start1 = (36,30)
+    goal1 = (37,18)
+    vel_obs = Velocity_Obstacle(start1, goal1, robot_radius = 0.5, timestep = 1, iter_max=10000)   
+    vel_obs.set_other_robots([])
+    print(vel_obs.robot_state)
+    vel_obs.step()
+    print(vel_obs.robot_state)

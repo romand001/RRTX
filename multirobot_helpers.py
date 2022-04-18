@@ -42,7 +42,7 @@ def env_plot(ax, rrtx):
         ax.add_patch(circle_patch)
         ax.draw_artist(circle_patch)
 
-def single_bot_plot(ax, rrtx):
+def single_bot_plot(ax, rrtx, sample_based = True):
     params = rrtx.plot_params
     # robot
     if params['robot']:
@@ -69,12 +69,20 @@ def single_bot_plot(ax, rrtx):
 
     # goal
     if params['goal']:
-        goal_patch = patches.Circle(
-            (rrtx.s_goal.x, rrtx.s_goal.y), 0.2,
-            edgecolor='black',
-            facecolor='black',
-            fill=True
-        )
+        if sample_based:
+            goal_patch = patches.Circle(
+                (rrtx.s_goal.x, rrtx.s_goal.y), 0.2,
+                edgecolor='black',
+                facecolor='black',
+                fill=True
+            )
+        else:
+            goal_patch = patches.Circle(
+                (rrtx.goal[0], rrtx.goal[1]), 0.2,
+                edgecolor='black',
+                facecolor='black',
+                fill=True
+            )
         ax.add_patch(goal_patch)
         ax.draw_artist(goal_patch)
 
