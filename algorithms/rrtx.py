@@ -127,6 +127,7 @@ class RRTX:
         self.Q = [] # priority queue of ComparableNodes
         self.robot_position = [self.s_bot.x, self.s_bot.y]
         self.robot_speed = 1.0 # m/s
+        self.distance_travelled = 0.0 # for stats
         self.path = []
         self.other_robots = [] # list of RRTX objects
         self.other_robot_obstacles = [] # list of circular obstacles (x, y, r)
@@ -184,6 +185,7 @@ class RRTX:
             self.s_bot, self.robot_position = self.utils.update_robot_position(
                 self.robot_position, self.s_bot, self.robot_speed, self.move_dist
             )
+            self.distance_travelled += self.robot_speed * self.move_dist # weird but this is how it works
 
         if self.s_bot.cost_to_goal < np.inf:
             self.path_to_goal = True
@@ -371,7 +373,7 @@ class RRTX:
 
         # check if robot node got orphaned
         if self.s_bot in self.orphan_nodes:
-            print('robot node got orphaned')
+            # print('robot node got orphaned')
             self.path_to_goal = False
         
         # put all outgoing neighbours of orphan nodes in Q and tell them to rewire

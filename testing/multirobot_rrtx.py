@@ -1,7 +1,11 @@
 import matplotlib.pyplot as plt
 from functools import partial
 
-from drrt import DRRT, Node
+import sys
+sys.path.insert(1, '../')
+sys.path.insert(1, '../algorithms')
+
+from rrtx import RRTX, Node
 import multirobot_helpers as mrh
 
 if __name__ == '__main__':
@@ -9,14 +13,13 @@ if __name__ == '__main__':
     rrt_params = {
         'iter_max': 100_000,
         'robot_radius': 0.5,
-        'step_len': 3.0,
-        'move_dist': 0.01, # must be < 0.05 bc that's used in update_robot_position()
+        'step_len': 5.0,
+        'move_dist': 0.02, # must be < 0.05 bc that's used in update_robot_position()
         'gamma_FOS': 5.0,
         'epsilon': 0.05,
-        'bot_sample_rate': 0.1,
-        'waypoint_sample_rate': 0.5,
+        'bot_sample_rate': 0.10,
         'starting_nodes': 500,
-        'node_limit': 5000, # for each robot. after this, new nodes only added if robot gets orphaned
+        'node_limit': 1000, # for each robot. after this, new nodes only added if robot gets orphaned
     }
 
     top_left = (4, 4)
@@ -36,21 +39,22 @@ if __name__ == '__main__':
     r4_start = (bottom_right[0] + 1, bottom_right[1] + 1)
     r4_goal = (top_left[0] - 1, top_left[1] - 1)
 
-    r1 = DRRT(
+    r1 = RRTX(
         x_start = r1_start,
         x_goal = r1_goal,
         robot_radius = rrt_params['robot_radius'],
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
+        gamma_FOS = rrt_params['gamma_FOS'],
+        epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
         plot_params = {
             'robot': True,
             'goal': True,
-            'tree': True,
+            'tree': False,
             'path': True,
             'nodes': False,
             'robot_color': 'blue',
@@ -59,14 +63,15 @@ if __name__ == '__main__':
         }
     )
 
-    r2 = DRRT(
+    r2 = RRTX(
         x_start = r2_start,
         x_goal = r2_goal,
         robot_radius = rrt_params['robot_radius'],
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
+        gamma_FOS = rrt_params['gamma_FOS'],
+        epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
@@ -82,14 +87,15 @@ if __name__ == '__main__':
         }
     )
 
-    r3 = DRRT(
+    r3 = RRTX(
         x_start = r3_start,
         x_goal = r3_goal,
         robot_radius = rrt_params['robot_radius'],
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
+        gamma_FOS = rrt_params['gamma_FOS'],
+        epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
@@ -105,14 +111,15 @@ if __name__ == '__main__':
         }
     )
 
-    r4 = DRRT(
+    r4 = RRTX(
         x_start = r4_start,
         x_goal = r4_goal,
         robot_radius = rrt_params['robot_radius'],
         step_len = rrt_params['step_len'],
         move_dist = rrt_params['move_dist'],
+        gamma_FOS = rrt_params['gamma_FOS'],
+        epsilon = rrt_params['epsilon'],
         bot_sample_rate = rrt_params['bot_sample_rate'],
-        waypoint_sample_rate = rrt_params['waypoint_sample_rate'],
         starting_nodes = rrt_params['starting_nodes'],
         node_limit = rrt_params['node_limit'],
         multi_robot = True,
@@ -148,7 +155,7 @@ if __name__ == '__main__':
     fig.canvas.mpl_connect('button_press_event', partial(mrh.update_click_obstacles, robots=robots))
 
     for i in range(rrt_params['iter_max']):
-        # DRRT step for each robot
+        # RRTX step for each robot
         for robot in robots:
             robot.step()
 
@@ -161,5 +168,5 @@ if __name__ == '__main__':
             fig.canvas.blit(ax.bbox)
             fig.canvas.flush_events()
 
-    print('\nDRRTcomplete!')
+    print('\nRRTX complete!')
 

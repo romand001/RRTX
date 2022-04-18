@@ -56,16 +56,16 @@ def single_bot_plot(ax, rrtx, sample_based = True):
         ax.draw_artist(bot_patch)
 
     # other robot obstacles (comment out later)
-    for (ox, oy, r) in rrtx.obs_robot:
-        obs_bot_patch = patches.Circle(
-            (ox, oy), r,
-            edgecolor='gray',
-            facecolor='gray',
-            fill=True,
-            alpha=0.5
-        )
-        ax.add_patch(obs_bot_patch)
-        ax.draw_artist(obs_bot_patch)
+    # for (ox, oy, r) in rrtx.obs_robot:
+    #     obs_bot_patch = patches.Circle(
+    #         (ox, oy), r,
+    #         edgecolor='gray',
+    #         facecolor='gray',
+    #         fill=True,
+    #         alpha=0.5
+    #     )
+    #     ax.add_patch(obs_bot_patch)
+    #     ax.draw_artist(obs_bot_patch)
 
     # goal
     if params['goal']:

@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 from functools import partial
 
+import sys
+sys.path.insert(1, '../')
+sys.path.insert(1, '../algorithms')
+
 from drrt_star import DRRTStar
 import multirobot_helpers as mrh
 

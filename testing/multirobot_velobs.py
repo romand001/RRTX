@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 from functools import partial
 
+import sys
+sys.path.insert(1, '../')
+sys.path.insert(1, '../algorithms')
+
 from velocity_obstacle import Velocity_Obstacle
 import multirobot_helpers as mrh
 

@@ -11,6 +11,8 @@ class Velocity_Obstacle:
         self.timestep = timestep
         self.iter_max = iter_max
         self.robot_state = self.start
+        self.distance_travelled = 0.0
+        self.reached_goal = False
         self.vmax = 0.2
         self.desired_vel = 0
         self.obstacle_robots = [[]]
@@ -58,6 +60,8 @@ class Velocity_Obstacle:
         self.compute_velocity() # find velocity that satisfies obstacle constraints and is closest to desired velocity
         self.update_state() # update robot state
         self.robot_position = self.robot_state[:2] # add this so multirobot helper functions can be used
+        if np.linalg.norm(self.robot_position - self.goal[:2]) < 1e-2:
+            self.reached_goal = True
     
     def single_robot_simulation(self):
         # start with plotting stuff
@@ -188,7 +192,7 @@ class Velocity_Obstacle:
             if np.any(v_sample):
                 v_sample = self.check_inside(v_sample, Amat[2*i:2*i+2, :], bvec[2*i:2*i+2])
             else:
-                print('No feasible velocity found')
+                # print('No feasible velocity found')
                 return
 
         return v_sample
@@ -223,6 +227,7 @@ class Velocity_Obstacle:
         new_state[:2] = self.robot_state[:2] + self.cmd_vel * self.timestep
         new_state[-2:] = self.cmd_vel
         self.robot_state = new_state
+        self.distance_travelled += np.linalg.norm(self.cmd_vel * self.timestep)
     
     def nearby_obstacles(self):
         # Finds obstacles within a certain radius of the robot
