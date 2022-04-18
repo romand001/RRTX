@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from functools import partial
 import multiprocessing
 from joblib import Parallel, delayed
+import pickle as pkl
 import time
 
 from agent_instances import *
@@ -71,9 +72,9 @@ if __name__ == '__main__':
             True  # Velocity Obstacle
         ],
         'num_sim': [
-            1, # RRTX
-            1, # DRRT
-            1, # DRRT*
+            100, # RRTX
+            100, # DRRT
+            100, # DRRT*
             1   # Velocity Obstacle
         ]
     }
@@ -110,6 +111,8 @@ if __name__ == '__main__':
             for result in out:
                 data[algo_names[exp_idx]]['time'].append(result['time'])
                 data[algo_names[exp_idx]]['average_path_length'].append(result['average_path_length'])
+
+    pkl.dump(data, open(f'experiment_data_{time.strftime("%Y%m%d-%H%M%S")}.pkl', 'wb'))
 
     # calculate statistics
     for algo_idx, algo_name in enumerate(algo_names):
