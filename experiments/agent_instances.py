@@ -1,6 +1,7 @@
 import sys
 sys.path.insert(1, '../')
 sys.path.insert(1, '../algorithms')
+sys.path.insert(1, 'algorithms')
 
 from rrtx import RRTX
 from drrt import DRRT
@@ -9,22 +10,26 @@ from velocity_obstacle import Velocity_Obstacle
 
 ''' ROBOT START AND GOALS '''
 
-top_left = (4, 4)
-top_right = (47, 4)
-bottom_left = (4, 27)
-bottom_right = (47, 27)
+top_left_in = (5, 26)
+top_left_out = (3, 28)
+bottom_right_in = (46, 5)
+bottom_right_out = (48, 3)
+top_right_in = (top_left_in[0], bottom_right_in[1])
+top_right_out = (top_left_out[0], bottom_right_out[1])
+bottom_left_in = (bottom_right_in[0], top_left_in[1])
+bottom_left_out = (bottom_right_out[0], top_left_out[1])
 
-r1_start = (top_left[0] + 1, top_left[1] + 1)
-r1_goal = (bottom_right[0] - 1, bottom_right[1] - 1)
+r1_start = top_left_in
+r1_goal = bottom_right_out
 
-r2_start = (top_right[0] - 1, top_right[1] + 1)
-r2_goal = (bottom_left[0] + 1, bottom_left[1] - 1)
+r2_start = top_right_in
+r2_goal = bottom_left_out
 
-r3_start = (bottom_left[0] + 1, bottom_left[1] + 1)
-r3_goal = (top_right[0] - 1, top_right[1] - 1)
+r3_start = bottom_right_in
+r3_goal = top_left_out
 
-r4_start = (bottom_right[0] - 1, bottom_right[1] - 1)
-r4_goal = (top_left[0] + 1, top_left[1] + 1)
+r4_start = bottom_left_in
+r4_goal = top_right_out
 
 
 plot_rrtx = False
@@ -48,15 +53,15 @@ algo_names = [
 def get_rrtx_agents():
 
     rrtx_params = {
-        'iter_max': 100_000,
+        'iter_max': 10_000,
         'robot_radius': 0.5,
         'step_len': 5.0,
-        'move_dist': 0.02, # must be < 0.05 bc that's used in update_robot_position()
+        'move_dist': 0.03, # must be < 0.05 bc that's used in update_robot_position()
         'gamma_FOS': 5.0,
         'epsilon': 0.05,
         'bot_sample_rate': 0.10,
         'starting_nodes': 500,
-        'node_limit': 1000, # for each robot. after this, new nodes only added if robot gets orphaned
+        'node_limit': 2000, # for each robot. after this, new nodes only added if robot gets orphaned
     }
 
     rrtx1 = RRTX(
@@ -160,7 +165,7 @@ def get_rrtx_agents():
 def get_drrt_agents():
 
     drrt_params = {
-        'iter_max': 100_000,
+        'iter_max': 10_000,
         'robot_radius': 0.5,
         'step_len': 3.0,
         'move_dist': 0.01, # must be < 0.05 bc that's used in update_robot_position()
@@ -269,7 +274,7 @@ def get_drrt_agents():
 def get_drrt_star_agents():
 
     drrt_star_params = {
-        'iter_max': 100_000,
+        'iter_max': 10_000,
         'robot_radius': 0.5,
         'step_len': 3.0,
         'move_dist': 0.01, # must be < 0.05 bc that's used in update_robot_position()

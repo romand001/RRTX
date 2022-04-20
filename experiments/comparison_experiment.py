@@ -1,9 +1,15 @@
 import matplotlib.pyplot as plt
+import numpy as np
 from functools import partial
 import multiprocessing
+from tqdm import tqdm
 from joblib import Parallel, delayed
 import pickle as pkl
 import time
+import sys
+
+sys.path.insert(1, 'C:/Users/Darie/Documents/UofT/Grad School/Courses/AER1516 - Robot Motion Planning/Project/Code/RRTX/algorithms')
+sys.path.insert(1, 'C:/Users/Darie/Documents/UofT/Grad School/Courses/AER1516 - Robot Motion Planning/Project/Code/RRTX')
 
 from agent_instances import *
 import multirobot_helpers as mrh
@@ -55,26 +61,37 @@ def run_simulation(exp_idx, agent_getter):
             fig.canvas.blit(ax.bbox)
             fig.canvas.flush_events()
 
-    # return stats
-    return {
-        'time': time.time() - start_time,
-        'path_lengths': [robot.distance_travelled for robot in robots]
-    }
+    if not finished:
+        # print(f'\r{algo_names[exp_idx]} failed to reach goal after {iter_idx+1} iterations')
+        return {
+            'time': None,
+            'path_lengths': [],
+        }
+    else:
+        if exp_idx == 0:
+            # potential race condition
+            with open('rrtx_intermitent_data.txt', 'a') as f:
+                f.write(f'{time.time() - start_time}, {[robot.distance_travelled for robot in robots]}\n')
+        # return stats
+        return {
+            'time': time.time() - start_time,
+            'path_lengths': [robot.distance_travelled for robot in robots]
+        }
 
 
 if __name__ == '__main__':
 
     experiment_settings = {
         'toggles': [
-            True, # RRTX
+            False, # RRTX
             True, # DRRT
             True, # DRRT*
             True  # Velocity Obstacle
         ],
         'num_sim': [
-            5, # RRTX
-            5, # DRRT
-            5, # DRRT*
+            100, # RRTX
+            100, # DRRT
+            100, # DRRT*
             1   # Velocity Obstacle
         ]
     }
@@ -93,6 +110,8 @@ if __name__ == '__main__':
             'path_lengths': []
         }
 
+    # np.random.seed(0)
+
     experiment_start_time = time.time()
 
     # iterate over algorithm type
@@ -101,18 +120,21 @@ if __name__ == '__main__':
         # check if we are running this algorithm
         if experiment_settings['toggles'][exp_idx]:
 
-            print(f'Running {experiment_settings["num_sim"][exp_idx]} {algo_names[exp_idx]} Simulations')
+            print(f'\rRunning {experiment_settings["num_sim"][exp_idx]} {algo_names[exp_idx]} Simulations')
 
-            out = Parallel(n_jobs=multiprocessing.cpu_count()-2)(delayed(run_simulation)
-                (
-                    exp_idx,
-                    agent_getters[exp_idx]
-                ) for _ in range(experiment_settings['num_sim'][exp_idx]))
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count()//2)
 
-            # add data to dict
-            for result in out:
+            for result in tqdm(pool.imap(
+                partial(run_simulation, agent_getter=agent_getters[exp_idx]), 
+                [exp_idx for _ in range(experiment_settings['num_sim'][exp_idx])]
+            )):
                 data[algo_names[exp_idx]]['time'].append(result['time'])
                 data[algo_names[exp_idx]]['path_lengths'].append(result['path_lengths'])
+
+            # add data to dict
+            # for result in out:
+            #     data[algo_names[exp_idx]]['time'].append(result['time'])
+            #     data[algo_names[exp_idx]]['path_lengths'].append(result['path_lengths'])
 
     print(f'Experiment took {time.time() - experiment_start_time} seconds')
     print(f'Saving data to pickle file')

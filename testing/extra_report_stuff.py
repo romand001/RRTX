@@ -24,22 +24,26 @@ if __name__ == '__main__':
         'node_limit': 1000, # for each robot. after this, new nodes only added if robot gets orphaned
     }
 
-    top_left = (4, 4)
-    top_right = (48, 4)
-    bottom_left = (4, 28)
-    bottom_right = (48, 28)
+    top_left_in = (5, 26)
+    top_left_out = (3, 28)
+    bottom_right_in = (46, 5)
+    bottom_right_out = (48, 3)
+    top_right_in = (top_left_in[0], bottom_right_in[1])
+    top_right_out = (top_left_out[0], bottom_right_out[1])
+    bottom_left_in = (bottom_right_in[0], top_left_in[1])
+    bottom_left_out = (bottom_right_out[0], top_left_out[1])
 
-    r1_start = (top_left[0] + 1, top_left[1] + 1)
-    r1_goal = (bottom_right[0] - 1, bottom_right[1] - 1)
+    r1_start = top_left_in
+    r1_goal = bottom_right_out
 
-    r2_start = (top_right[0] + 1, top_right[1] + 1)
-    r2_goal = (bottom_left[0] - 1, bottom_left[1] - 1)
+    r2_start = top_right_in
+    r2_goal = bottom_left_out
 
-    r3_start = (bottom_left[0] + 1, bottom_left[1] + 1)
-    r3_goal = (top_right[0] - 1, top_right[1] - 1)
+    r3_start = bottom_right_in
+    r3_goal = top_left_out
 
-    r4_start = (bottom_right[0] + 1, bottom_right[1] + 1)
-    r4_goal = (top_left[0] - 1, top_left[1] - 1)
+    r4_start = bottom_left_in
+    r4_goal = top_right_out
 
     r1 = RRTX(
         x_start = r1_start,
@@ -155,6 +159,12 @@ if __name__ == '__main__':
 
     # event handling
     fig.canvas.mpl_connect('button_press_event', partial(mrh.update_click_obstacles, robots=robots))
+
+    for robot in robots:
+        mrh.single_bot_plot(ax, robot)
+    mrh.env_plot(ax, robots[0])
+    fig.canvas.blit(ax.bbox)
+    fig.canvas.flush_events()
 
     for i in range(rrt_params['iter_max']):
         # RRTX step for each robot

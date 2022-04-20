@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-import env, plotting, utils, queue
+import env, plotting, utils
 
 class Node(Sequence):
     # inherits from Sequence to support indexing and thus kd-tree support
